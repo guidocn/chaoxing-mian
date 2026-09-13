@@ -11,7 +11,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "chaoxing-mian"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "a57f7dcd-48e6-41d1-a265-4456e876a351"
 
 [vars]
 ENVIRONMENT = "production"

@@ -1,0 +1,24 @@
+name = "cx-auto-study"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare D1 数据库绑定。
+# 首次使用：
+#   1. npx wrangler d1 create cx_auto_study
+#   2. 将下面 database_id 替换为上一步输出的真实 ID
+#   3. 初始化表结构：
+#      npx wrangler d1 execute cx_auto_study --remote --file=./schema.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "cx_auto_study"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+ENVIRONMENT = "production"
+
+# 敏感环境变量请在 Cloudflare 控制台或用 secret 设置，切勿写入本文件：
+#   APP_SECRET         会话与本地凭据加密主密钥（至少 32 位随机字符串）
+#   ADMIN_SETUP_CODE   注册首位管理员所需的邀请码（可选）
+# 本地开发可在 .dev.vars 中设置：
+#   APP_SECRET="dev-only-please-change-to-a-long-random-secret"
+#   ADMIN_SETUP_CODE="setup-code"

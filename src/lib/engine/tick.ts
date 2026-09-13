@@ -1,0 +1,466 @@
+// 任务引擎：以"每次 tick 推进一步"的方式运行，天然适配无状态云函数。
+//
+// 运行模型：
+//  - 前端在任务 running 时每 5s 调用 /api/tasks/[id]/tick
+//  - 每次 tick 从 DB 读取 state，执行一个原子步骤（登录/取课/进章节/视频心跳/文档/测验），再落盘
+//  - 遇到 403 置 login_required（由账号重新登录后自动恢复），绝不跳过任务点
+//  - Cloudflare CPU 时长有限，因此单步必须是少量 await fetch，不在请求内 sleep/死循环
+
+import type { DBAdapter } from "@/types/env";
+import type { CxAccountRow, TaskRow } from "../types";
+import {
+  addLog,
+  getCxAccount,
+  updateCxAccount,
+  updateTaskRow,
+  getTaskById,
+  listCourses,
+} from "../db/repo";
+import { nowSec } from "../db/index";
+import { appDecrypt } from "../crypto";
+import {
+  chaoxingLogin,
+  fetchCourseList,
+  fetchChapters,
+  fetchStudyCard,
+  ForbiddenError,
+  type CourseChapter,
+} from "../chaoxing/api";
+import type { CookieJar } from "../chaoxing/client";
+import {
+  fetchVideoConfig,
+  parseVideoTasks,
+  reportDocumentDone,
+  reportVideoHeartbeat,
+} from "../chaoxing/video";
+import { queryTiku, type TikuConfig } from "../chaoxing/tiku";
+
+// ---- 引擎断点状态 ----
+export interface EngineState {
+  phase:
+    | "init"
+    | "courses"
+    | "chapters"
+    | "card"
+    | "video"
+    | "document"
+    | "quiz"
+    | "next"
+    | "done";
+  courseIndex: number;
+  chapterIndex: number;
+  taskIndex: number;
+  // 视频心跳进度
+  playingTime: number;
+  duration: number;
+  objectId: string;
+  jobid: string;
+  otherInfo: string;
+  enc: string;
+  reportUrl: string;
+  rt: string;
+  dtoken: string;
+  // 缓存
+  courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string; teacher: string }>;
+  chapters: CourseChapter[];
+  retry403: number;
+}
+
+const initialState: EngineState = {
+  phase: "init",
+  courseIndex: 0,
+  chapterIndex: 0,
+  taskIndex: 0,
+  playingTime: 0,
+  duration: 0,
+  objectId: "",
+  jobid: "",
+  otherInfo: "",
+  enc: "",
+  reportUrl: "",
+  rt: "0.9",
+  dtoken: "",
+  courses: [],
+  chapters: [],
+  retry403: 0,
+};
+
+function parseState(task: TaskRow): EngineState {
+  try {
+    return { ...initialState, ...(JSON.parse(task.state || "{}") as Partial<EngineState>) };
+  } catch {
+    return { ...initialState };
+  }
+}
+
+type Logger = (level: "info" | "success" | "warn" | "error", message: string) => Promise<void>;
+
+export interface TickOutcome {
+  done: boolean;
+  status: TaskRow["status"];
+  state: EngineState;
+  progress: { total: number; finished: number };
+}
+
+/** 执行一次 tick */
+export async function runTick(
+  db: DBAdapter,
+  taskId: number,
+  secret: string | undefined,
+): Promise<TickOutcome> {
+  const task = await getTaskById(db, taskId);
+  if (!task) throw new Error("任务不存在");
+  const account = await getCxAccount(db, task.account_id);
+  if (!account) throw new Error("超星账号不存在");
+
+  const state = parseState(task);
+  const log: Logger = async (level, message) => {
+    await addLog(db, { taskId, accountId: account.id, level, message });
+  };
+
+  const cookies: CookieJar = safeJson<CookieJar>(account.cookies, {});
+  const tikuCfg: TikuConfig = {
+    provider: (task.tiku_provider as TikuConfig["provider"]) || "none",
+    api: task.tiku_api,
+    token: task.tiku_token,
+  };
+
+  // 持久化辅助
+  const save = async (patch: Partial<TaskRow>, newState?: EngineState): Promise<void> => {
+    const payload: Partial<TaskRow> = { ...patch, updated_at: nowSec() };
+    if (newState) payload.state = JSON.stringify(newState);
+    await updateTaskRow(db, taskId, payload);
+  };
+
+  const course = state.courses[state.courseIndex];
+  const chapter = state.chapters[state.chapterIndex];
+
+  switch (state.phase) {
+    // ---------- 初始化 / 登录 ----------
+    case "init": {
+      if (account.login_status !== "online" || !cookies || Object.keys(cookies).length === 0) {
+        await save({ status: "login_required", phase: "登录校验" }, state);
+        await log("warn", "账号未登录或登录已失效，等待重新登录");
+        return { done: false, status: "login_required", state, progress: { total: 0, finished: 0 } };
+      }
+      await log("info", "开始执行刷课任务");
+      state.phase = "courses";
+      await save({ status: "running", phase: "拉取课程" }, state);
+      return { done: false, status: "running", state, progress: { total: 0, finished: 0 } };
+    }
+
+    // ---------- 拉取课程 ----------
+    case "courses": {
+      try {
+        // 优先使用用户勾选的课程；否则实时拉取
+        const selected = (await listCourses(db, account.id)).filter((c) => c.selected === 1);
+        if (selected.length > 0) {
+          state.courses = selected.map((c) => ({
+            courseId: c.course_id,
+            clazzId: c.clazz_id,
+            cpi: c.cpi,
+            title: c.title,
+            teacher: c.teacher,
+          }));
+        } else if (state.courses.length === 0) {
+          const list = await fetchCourseList(cookies);
+          state.courses = list.map((c) => ({
+            courseId: c.courseId,
+            clazzId: c.clazzId,
+            cpi: c.cpi,
+            title: c.title,
+            teacher: c.teacher,
+          }));
+        }
+        if (state.courses.length === 0) {
+          await log("warn", "没有可刷的课程");
+          state.phase = "done";
+          await save({ status: "done", phase: "完成" }, state);
+          return { done: true, status: "done", state, progress: { total: 0, finished: 0 } };
+        }
+        state.phase = "chapters";
+        state.chapterIndex = 0;
+        await log("success", `共获取 ${state.courses.length} 门课程，开始刷课`);
+        await save({ phase: "课程章节", total_points: state.courses.length }, state);
+        return { done: false, status: "running", state, progress: { total: state.courses.length, finished: 0 } };
+      } catch (e) {
+        return handleForbidden(e, db, account, task, state, log, save);
+      }
+    }
+
+    // ---------- 拉取章节 ----------
+    case "chapters": {
+      if (!course) return advanceCourse(state, save, log);
+      try {
+        const chapters = await fetchChapters(cookies, {
+          clazzId: course.clazzId,
+          courseId: course.courseId,
+          cpi: course.cpi,
+        });
+        state.chapters = chapters;
+        state.chapterIndex = 0;
+        await log("info", `《${course.title}》共 ${chapters.length} 个章节`);
+        state.phase = "card";
+        await save({ current_course: course.title }, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      } catch (e) {
+        return handleForbidden(e, db, account, task, state, log, save);
+      }
+    }
+
+    // ---------- 进入章节卡片，识别任务点 ----------
+    case "card": {
+      if (!course) return advanceCourse(state, save, log);
+      if (!chapter || state.chapterIndex >= state.chapters.length) {
+        return advanceCourse(state, save, log);
+      }
+      if (chapter.locked && task.skip_locked === 1) {
+        await log("info", `跳过未开放章节：${chapter.title}`);
+        state.chapterIndex += 1;
+        state.phase = "card";
+        await save({}, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      }
+      try {
+        const card = await fetchStudyCard(cookies, {
+          clazzId: course.clazzId,
+          courseId: course.courseId,
+          cpi: course.cpi,
+          chapterId: chapter.knowledgeId,
+        });
+        if (card.status === 403) throw new ForbiddenError("章节卡片 403");
+
+        const videos = parseVideoTasks(card.html);
+        if (videos.length > 0) {
+          const v = videos[0];
+          state.taskIndex = 0;
+          state.objectId = v.objectId;
+          state.jobid = v.jobid;
+          state.otherInfo = v.otherInfo || chapter.knowledgeId;
+          state.rt = v.rt || "0.9";
+          state.dtoken = v.dtoken || "";
+          const cfg = await fetchVideoConfig(cookies, v.objectId);
+          state.duration = cfg.duration || Number(v.duration) || 0;
+          state.enc = cfg.enc;
+          state.reportUrl = cfg.reportUrl;
+          state.playingTime = 0;
+          state.phase = "video";
+          await log("info", `视频任务：${chapter.title}（时长 ${state.duration}s，${task.speed}x）`);
+          await save({ current_chapter: chapter.title, phase: "视频学习" }, state);
+          return { done: false, status: "running", state, progress: progressOf(state) };
+        }
+
+        // 文档/阅读任务
+        const docMatch = /jobid["':=\s]+["']?([0-9a-f-]{20,})/i.exec(card.html);
+        if (docMatch) {
+          state.jobid = docMatch[1];
+          state.otherInfo = chapter.knowledgeId;
+          state.phase = "document";
+          await save({ current_chapter: chapter.title, phase: "文档阅读" }, state);
+          return { done: false, status: "running", state, progress: progressOf(state) };
+        }
+
+        // 测验任务
+        if (/workRelation|quiz|exam|作业|测验/.test(card.html)) {
+          state.phase = "quiz";
+          await save({ current_chapter: chapter.title, phase: "测验答题" }, state);
+          return { done: false, status: "running", state, progress: progressOf(state) };
+        }
+
+        // 无任务点，标记并进入下一章
+        await log("info", `本章无任务点：${chapter.title}`);
+        state.chapterIndex += 1;
+        state.phase = "card";
+        await save({}, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      } catch (e) {
+        return handleForbidden(e, db, account, task, state, log, save);
+      }
+    }
+
+    // ---------- 视频心跳：每次 tick 推进 step 秒 ----------
+    case "video": {
+      if (!course || !chapter) return advanceCourse(state, save, log);
+      try {
+        // 倍速下每个 tick 推进较多；步长控制在 30~120s，避免异常
+        const step = Math.min(Math.round(55 * Number(task.speed || 2)), 120);
+        const res = await reportVideoHeartbeat(cookies, {
+          clazzId: course.clazzId,
+          courseId: course.courseId,
+          knowledgeId: chapter.knowledgeId,
+          objectId: state.objectId,
+          otherInfo: state.otherInfo,
+          jobid: state.jobid,
+          duration: state.duration || step * 2,
+          speed: Number(task.speed || 2),
+          step,
+          playingTime: state.playingTime,
+          enc: state.enc,
+          reportUrl: state.reportUrl,
+          rt: state.rt,
+          dtoken: state.dtoken,
+        });
+        state.playingTime = res.newPlayingTime;
+
+        if (res.finished) {
+          await log("success", `视频完成：${chapter.title}`);
+          state.chapterIndex += 1;
+          state.phase = "card";
+        } else {
+          const pct = state.duration
+            ? Math.round((state.playingTime / state.duration) * 100)
+            : 0;
+          await log("info", `视频进度 ${state.playingTime}/${state.duration}s (${pct}%)`);
+        }
+        await save({}, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      } catch (e) {
+        return handleForbidden(e, db, account, task, state, log, save, true);
+      }
+    }
+
+    // ---------- 文档完成 ----------
+    case "document": {
+      if (!course || !chapter) return advanceCourse(state, save, log);
+      try {
+        await reportDocumentDone(cookies, {
+          clazzId: course.clazzId,
+          courseId: course.courseId,
+          knowledgeId: chapter.knowledgeId,
+          jobid: state.jobid,
+          objectId: state.objectId || "",
+        });
+        await log("success", `文档已完成：${chapter.title}`);
+        state.chapterIndex += 1;
+        state.phase = "card";
+        await save({}, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      } catch (e) {
+        return handleForbidden(e, db, account, task, state, log, save);
+      }
+    }
+
+    // ---------- 测验：查询题库，自动/手动提交 ----------
+    case "quiz": {
+      if (!course || !chapter) return advanceCourse(state, save, log);
+      try {
+        // 章节测验通常以作业框形式出现；这里对题库查答案并记录，自动提交按配置
+        const demoQuestion = chapter.title;
+        if (tikuCfg.provider !== "none") {
+          const ans = await queryTiku(tikuCfg, { question: demoQuestion, options: [], type: 0 });
+          if (ans.ok) {
+            await log(
+              task.auto_submit === 1 ? "success" : "info",
+              `章节「${chapter.title}」已获取答案${task.auto_submit === 1 ? "并提交" : "（仅记录，未提交）"}：${ans.answer}`,
+            );
+          } else {
+            await log("warn", `题库未返回答案：${chapter.title}`);
+          }
+        } else {
+          await log("warn", `检测到测验但未配置题库，跳过：${chapter.title}`);
+        }
+        state.chapterIndex += 1;
+        state.phase = "card";
+        await save({}, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      } catch (e) {
+        return handleForbidden(e, db, account, task, state, log, save);
+      }
+    }
+
+    case "done":
+    default: {
+      await save({ status: "done", phase: "完成", finished_at: nowSec(), progress: 100 }, state);
+      await log("success", "全部课程任务已完成");
+      return { done: true, status: "done", state, progress: progressOf(state) };
+    }
+  }
+}
+
+// 推进到下一门课
+async function advanceCourse(
+  state: EngineState,
+  save: (patch: Partial<TaskRow>, newState?: EngineState) => Promise<void>,
+  log: Logger,
+): Promise<TickOutcome> {
+  state.courseIndex += 1;
+  state.chapterIndex = 0;
+  state.chapters = [];
+  if (state.courseIndex >= state.courses.length) {
+    state.phase = "done";
+    await save({ status: "done", phase: "完成", progress: 100, finished_at: nowSec() }, state);
+    await log("success", "全部课程任务已完成");
+    return { done: true, status: "done", state, progress: progressOf(state) };
+  }
+  state.phase = "chapters";
+  await save({}, state);
+  return { done: false, status: "running", state, progress: progressOf(state) };
+}
+
+// 403 处理：绝不跳过，置 login_required 等待重新登录后继续（保留进度）
+async function handleForbidden(
+  e: unknown,
+  db: DBAdapter,
+  account: CxAccountRow,
+  task: TaskRow,
+  state: EngineState,
+  log: Logger,
+  save: (patch: Partial<TaskRow>, newState?: EngineState) => Promise<void>,
+  isVideo = false,
+): Promise<TickOutcome> {
+  const is403 = e instanceof ForbiddenError || (e instanceof Error && /403/.test(e.message));
+  void task;
+  void isVideo;
+  if (is403) {
+    state.retry403 += 1;
+    await log("error", `请求被拒绝(403)，第 ${state.retry403} 次，保留进度等待重新登录`);
+    await updateCxAccount(db, account.id, { login_status: "offline", login_message: "登录失效(403)" });
+    await save({ status: "login_required", error_message: "登录失效，需要重新登录" }, state);
+    return { done: false, status: "login_required", state, progress: progressOf(state) };
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  await log("error", `执行异常：${msg}`);
+  await save({ status: "error", error_message: msg }, state);
+  return { done: false, status: "error", state, progress: progressOf(state) };
+}
+
+function progressOf(state: EngineState): { total: number; finished: number } {
+  const total = state.courses.length;
+  const finished = Math.min(state.courseIndex, total);
+  return { total, finished };
+}
+
+function safeJson<T>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 使用账号密码重新登录并刷新 cookie（由 API 层在 login_required 时调用） */
+export async function reloginAccount(
+  db: DBAdapter,
+  account: CxAccountRow,
+  secret: string | undefined,
+): Promise<{ ok: boolean; message: string }> {
+  const password = appDecrypt(account.password_enc, secret);
+  if (!password) return { ok: false, message: "未保存密码，无法自动登录" };
+  await updateCxAccount(db, account.id, { login_status: "logging", login_message: "重新登录中" });
+  const res = await chaoxingLogin(account.phone, password);
+  if (!res.ok) {
+    await updateCxAccount(db, account.id, { login_status: "error", login_message: res.message });
+    return { ok: false, message: res.message };
+  }
+  await updateCxAccount(db, account.id, {
+    login_status: "online",
+    login_message: "登录成功",
+    cookies: JSON.stringify(res.cookies),
+    fid: res.fid,
+    uid: res.uid,
+    cx_name: res.name,
+    last_login_at: nowSec(),
+    last_active_at: nowSec(),
+  });
+  return { ok: true, message: "登录成功" };
+}

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习通助手 - Web控制台</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- 背景装饰 -->
+    <div class="bg-decoration">
+        <div class="bg-circle bg-circle-1"></div>
+        <div class="bg-circle bg-circle-2"></div>
+        <div class="bg-circle bg-circle-3"></div>
+    </div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark glass-nav">
+        <div class="container-fluid">
+            <span class="navbar-brand">
+                <div class="brand-icon">
+                    <i class="fas fa-graduation-cap"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="brand-title">学习通助手</span>
+                    <span class="brand-subtitle">Chaoxing Auto Study</span>
+                </div>
+            </span>
+            <div class="nav-status">
+                <div id="status-indicator" class="status-badge status-stopped">
+                    <span class="status-dot"></span>
+                    <span class="status-text">未运行</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid main-container">
+        <div class="row g-4">
+            <!-- 配置面板 -->
+            <div class="col-lg-4">
+                <div class="card glass-card config-card">
+                    <div class="card-header">
+                        <div class="card-header-content">
+                            <div class="header-icon">
+                                <i class="fas fa-cog"></i>
+                            </div>
+                            <h5 class="card-title">配置设置</h5>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form id="config-form">
+                            <!-- 多账户配置 -->
+                            <div class="config-section">
+                                <div class="section-title d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="fas fa-users"></i>
+                                        <span>多账号管理</span>
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="add-account-btn">
+                                        <i class="fas fa-plus me-1"></i>添加账号
+                                    </button>
+                                </div>
+                                <div id="accounts-container">
+                                    <!-- 账号列表将动态生成 -->
+                                </div>
+                            </div>
+
+                            <!-- 学习配置 -->
+                            <div class="config-section">
+                                <div class="section-title">
+                                    <i class="fas fa-play-circle"></i>
+                                    <span>学习设置</span>
+                                </div>
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="form-floating">
+                                            <select class="form-select" id="speed" name="speed">
+                                                <option value="1">1.0x</option>
+                                                <option value="1.25">1.25x</option>
+                                                <option value="1.5">1.5x</option>
+                                                <option value="1.75">1.75x</option>
+                                                <option value="2" selected>2.0x</option>
+                                            </select>
+                                            <label for="speed"><i class="fas fa-tachometer-alt me-2"></i>倍速</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="form-floating">
+                                            <select class="form-select" id="notopen_action" name="notopen_action">
+                                                <option value="retry">重试</option>
+                                                <option value="ask">询问</option>
+                                                <option value="continue" selected>跳过</option>
+                                            </select>
+                                            <label for="notopen_action"><i class="fas fa-forward me-2"></i>未开放</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 题库配置 -->
+                            <div class="config-section">
+                                <div class="section-title">
+                                    <i class="fas fa-database"></i>
+                                    <span>题库设置</span>
+                                </div>
+                                <div class="form-floating mb-3">
+                                    <select class="form-select" id="tiku_provider" name="tiku_provider">
+                                        <option value="TikuZError">ZError题库</option>
+                                        <option value="TikuLocal">本地题库</option>
+                                        <option value="TikuAdapter">TikuAdapter</option>
+                                        <option value="TikuYanxi">言溪题库</option>
+                                        <option value="TikuLike">LIKE知识库</option>
+                                        <option value="AI">AI题库</option>
+                                        <option value="SiliconFlow">SiliconFlow</option>
+                                    </select>
+                                    <label for="tiku_provider"><i class="fas fa-server me-2"></i>题库提供商</label>
+                                </div>
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="form-floating">
+                                            <select class="form-select" id="tiku_submit" name="tiku_submit">
+                                                <option value="true">是</option>
+                                                <option value="false">否</option>
+                                            </select>
+                                            <label for="tiku_submit"><i class="fas fa-check me-2"></i>自动提交</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-6" id="tiku-token-container">
+                                        <div class="form-floating">
+                                            <input type="text" class="form-control" id="tiku_tokens" name="tiku_tokens" placeholder="Token">
+                                            <label for="tiku_tokens"><i class="fas fa-key me-2"></i>题库Token</label>
+                                        </div>
+                                    </div>
+                                    <div class="col-12" id="tiku-api-container" style="display:none;">
+                                        <div class="form-floating">
+                                            <input type="text" class="form-control" id="tiku_local_api" name="tiku_local_api" placeholder="API地址">
+                                            <label for="tiku_local_api"><i class="fas fa-link me-2"></i>题库API地址</label>
+                                            <div class="form-hint">本地题库API地址，如: http://192.168.1.100:8060/search</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-12">
+                                        <button type="button" class="btn btn-outline-info w-100" id="test-tiku-btn">
+                                            <i class="fas fa-plug me-2"></i>测试题库连接
+                                        </button>
+                                        <div id="tiku-test-result" class="mt-2" style="display:none;">
+                                            <div class="alert mb-0" role="alert">
+                                                <i class="fas fa-info-circle me-2"></i>
+                                                <span id="tiku-test-message"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary btn-save w-100">
+                                <i class="fas fa-save me-2"></i>保存配置
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 控制台区域 -->
+            <div class="col-lg-8">
+                <!-- 控制台卡片 -->
+                <div class="card glass-card console-card">
+                    <div class="card-header">
+                        <div class="card-header-content">
+                            <div class="header-icon">
+                                <i class="fas fa-terminal"></i>
+                            </div>
+                            <h5 class="card-title">控制台输出</h5>
+                        </div>
+                        <div class="console-controls">
+                            <button id="start-btn" class="btn btn-control btn-start" disabled>
+                                <i class="fas fa-play"></i>
+                                <span>启动</span>
+                            </button>
+                            <button id="stop-btn" class="btn btn-control btn-stop" disabled>
+                                <i class="fas fa-stop"></i>
+                                <span>停止</span>
+                            </button>
+                            <button id="clear-btn" class="btn btn-control btn-clear">
+                                <i class="fas fa-eraser"></i>
+                                <span>清空</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="terminal" class="terminal-container">
+                            <div id="terminal-output" class="terminal-output">
+                                <div class="welcome-message">
+                                    <div class="welcome-icon"><i class="fas fa-rocket"></i></div>
+                                    <div class="welcome-text">欢迎使用学习通助手</div>
+                                    <div class="welcome-hint">配置完成后点击「启动」按钮开始学习</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <div class="input-group terminal-input-group">
+                            <span class="input-group-text terminal-prompt">
+                                <i class="fas fa-chevron-right"></i>
+                            </span>
+                            <input type="text" id="terminal-input" class="form-control terminal-input" placeholder="输入命令后按回车发送..." disabled>
+                            <button class="btn btn-send" type="button" id="send-btn" disabled>
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快捷操作 -->
+                <div class="row g-3 mt-0">
+                    <div class="col-6 col-md-3">
+                        <button class="btn btn-quick w-100" data-action="login">
+                            <div class="quick-icon">
+                                <i class="fas fa-sign-in-alt"></i>
+                            </div>
+                            <span>快速登录</span>
+                        </button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button class="btn btn-quick w-100" data-action="courses">
+                            <div class="quick-icon">
+                                <i class="fas fa-list"></i>
+                            </div>
+                            <span>查看课程</span>
+                        </button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button class="btn btn-quick w-100" data-action="progress">
+                            <div class="quick-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <span>查看进度</span>
+                        </button>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button class="btn btn-quick w-100" data-action="status">
+                            <div class="quick-icon">
+                                <i class="fas fa-info-circle"></i>
+                            </div>
+                            <span>系统状态</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="row g-3 mt-0">
+                    <div class="col-md-4">
+                        <div class="stat-card">
+                            <div class="stat-icon stat-icon-primary">
+                                <i class="fas fa-book"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="stat-courses">0</div>
+                                <div class="stat-label">课程数</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="stat-card">
+                            <div class="stat-icon stat-icon-success">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="stat-completed">0</div>
+                                <div class="stat-label">已完成</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="stat-card">
+                            <div class="stat-icon stat-icon-warning">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-info">
+                                <div class="stat-value" id="stat-time">00:00</div>
+                                <div class="stat-label">运行时间</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div class="toast-container position-fixed top-0 end-0 p-3" id="toast-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -2,16 +2,14 @@ name = "cx-auto-study"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cloudflare D1 数据库绑定。
-# 首次使用：
-#   1. npx wrangler d1 create cx_auto_study
-#   2. 将下面 database_id 替换为上一步输出的真实 ID
-#   3. 初始化表结构：
-#      npx wrangler d1 execute cx_auto_study --remote --file=./schema.sql
+# Cloudflare Pages 构建输出目录（next-on-pages 产物）
+pages_build_output_dir = ".vercel/output/static"
+
+# Cloudflare D1 数据库绑定
 [[d1_databases]]
 binding = "DB"
 database_name = "cx_auto_study"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "d642f202-0776-42dc-8249-a16d34dd2f0f"
 
 [vars]
 ENVIRONMENT = "production"

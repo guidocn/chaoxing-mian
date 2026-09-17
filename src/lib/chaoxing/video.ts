@@ -143,8 +143,8 @@ export function parseVideoTasks(html: string): Array<Record<string, string>> {
 
   // 形如 mArg = {...}; 或 window.videoConfig = {...}
   const objectRe = /objectId["':\s]+["']?([0-9a-f]{20,})/gi;
-  const jobRe = /jobid["':=\s]+["']?([0-9a-f-]{20,})/gi;
-  const otherRe = /otherInfo["':=\s]+["']?(\d+)/gi;
+  const jobRe = /jobid["':=\s]+["']?([0-9a-f]{8,})/gi;
+  const otherRe = /otherInfo["':=\s]+["']?([^"',}\s]{4,})/gi;
   const rtRe = /\brt["':=\s]+["']([\d.]+)["']/i;
   const dtokenRe = /dtoken["':=\s]+["']([0-9a-f]+)["']/i;
   const durationRe = /(?:duration|timeLong|videoTime)["':=\s]+["']?(\d+)/i;

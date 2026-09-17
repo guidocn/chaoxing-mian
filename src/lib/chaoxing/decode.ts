@@ -13,23 +13,33 @@ export interface CourseInfo {
 /** 解析课程列表页 courselistdata 返回的 HTML */
 export function decodeCourseList(html: string): CourseInfo[] {
   const courses: CourseInfo[] = [];
-  // 每个课程块 <div ... class="course" ...>
-  const blockRe = /<div[^>]*class="[^"]*\bcourse\b[^"]*"[^>]*>[\s\S]*?<\/div>\s*(?=<div|<ul|$)/gi;
-  const blocks = html.match(/<div[^>]*class="[^"]*\bcourse\b[^"]*"[\s\S]*?(?=<div[^>]*class="[^"]*\bcourse\b|$)/gi) ?? [];
-  void blockRe;
+  // 课程块：class="course ..."（排除 course-list 容器、course-cover 等）
+  const blocks =
+    html.match(
+      /<div[^>]*class="course(?:[ "]|$)[^"]*"[\s\S]*?(?=<div[^>]*class="course(?:[ "]|$)|$)/gi,
+    ) ?? [];
   for (const block of blocks) {
     if (/not-open-tip/.test(block)) continue; // 未开放课程跳过
-    const id = /\bid="([^"]+)"/.exec(block)?.[1] ?? "";
-    const clazzId = /class="clazzId"[^>]*value="([^"]*)"/.exec(block)?.[1]
-      ?? /name="clazzId"[^>]*value="([^"]*)"/.exec(block)?.[1] ?? "";
-    const courseId = /class="courseId"[^>]*value="([^"]*)"/.exec(block)?.[1]
-      ?? /name="courseId"[^>]*value="([^"]*)"/.exec(block)?.[1] ?? "";
+    const id = /\bid="c_([^"]+)"/.exec(block)?.[1] ?? "";
+    const clazzId =
+      /class="clazzId"[^>]*value="([^"]*)"/.exec(block)?.[1] ??
+      /name="clazzId"[^>]*value="([^"]*)"/.exec(block)?.[1] ??
+      "";
+    const courseId =
+      /class="courseId"[^>]*value="([^"]*)"/.exec(block)?.[1] ??
+      /name="courseId"[^>]*value="([^"]*)"/.exec(block)?.[1] ??
+      "";
     const href = /<a[^>]*href="([^"]*)"/.exec(block)?.[1] ?? "";
     const cpi = /[?&]cpi=([^&"]+)/.exec(href)?.[1] ?? "";
-    const title = /class="course-name"[^>]*title="([^"]*)"/.exec(block)?.[1]
-      ?? /<span[^>]*class="[^"]*course-name[^"]*"[^>]*>([\s\S]*?)<\/span>/.exec(block)?.[1]?.trim() ?? "";
-    const teacher = /class="color3"[^>]*title="([^"]*)"/.exec(block)?.[1]
-      ?? /<p[^>]*class="[^"]*color3[^"]*"[^>]*>([\s\S]*?)<\/p>/.exec(block)?.[1]?.trim() ?? "";
+    // course-name 的 class 常带附加类（如 overHidden2），且 title 属性优先于内容
+    const title =
+      /<span[^>]*class="[^"]*course-name[^"]*"[^>]*title="([^"]*)"/.exec(block)?.[1] ??
+      /<span[^>]*class="[^"]*course-name[^"]*"[^>]*>([\s\S]*?)<\/span>/.exec(block)?.[1]?.trim() ??
+      "";
+    const teacher =
+      /class="color3"[^>]*title="([^"]*)"/.exec(block)?.[1] ??
+      /<span[^>]*class="[^"]*color3[^"]*"[^>]*>([\s\S]*?)<\/span>/.exec(block)?.[1]?.trim() ??
+      "";
     const desc = /margint10[^>]*title="([^"]*)"/.exec(block)?.[1] ?? "";
     if (courseId || clazzId) {
       courses.push({
@@ -67,28 +77,31 @@ export interface ChapterPoint {
   locked: boolean;
 }
 
-/** 解析章节列表页 mycourse/studentstudy 中的章节 */
+/** 解析章节列表页（mooc2-ans mycourse/studentcourse 返回的 HTML）中的知识点节点 */
 export function decodeChapterList(html: string): { hasLocked: boolean; points: ChapterPoint[] } {
   const points: ChapterPoint[] = [];
   let hasLocked = false;
 
-  // 章节节点 <li ...> 内含 onclick 或 data 属性，以及未完成/锁定标记
-  const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
+  // 知识点节点：<div class="chapter_item" id="curXXX" onclick="toOld('courseid','knowledgeId','clazzid',0)" ...>
+  // 每个知识点是一个 chapter_item 块，内部含 catalog_name 标题与 input[value=knowledgeId]
+  const itemRe =
+    /<div[^>]*class="[^"]*chapter_item[^"]*"[^>]*>[\s\S]*?(?=<div[^>]*class="[^"]*chapter_item[^"]*"|<div[^>]*class="[^"]*chapter_unit[^"]*"|<\/div>\s*<\/div>\s*<!-- 第二级|<!-- 第二级开始|$)/gi;
   let m: RegExpExecArray | null;
-  while ((m = liRe.exec(html)) !== null) {
+  while ((m = itemRe.exec(html)) !== null) {
     const block = m[0];
+    if (!/chapter_item/.test(block)) continue;
     const onclick = /onclick="([^"]*)"/.exec(block)?.[1] ?? "";
-    // 典型: getTeacherAjax('xxx','yyy') 或 内含 knowledgeid
+    // toOld('courseId','knowledgeId','clazzId',0)
     const ids = onclick.match(/'([^']+)'/g)?.map((x) => x.replace(/'/g, "")) ?? [];
-    const id = ids[0] ?? /data-id="([^"]+)"/.exec(block)?.[1] ?? "";
-    const knowledgeId = ids[1] ?? /knowledgeid["'=:\s]+(\d+)/.exec(block)?.[1] ?? "";
+    const knowledgeId = ids[1] ?? /value="(\d+)"/.exec(block)?.[1] ?? "";
+    const id = knowledgeId;
     const title =
-      /class="[^"]*articlename[^"]*"[^>]*>([\s\S]*?)<\/a>/.exec(block)?.[1]?.replace(/<[^>]+>/g, "").trim()
-      ?? /title="([^"]*)"/.exec(block)?.[1]
-      ?? "";
+      /<span[^>]*class="[^"]*catalog_sbar[^"]*"[^>]*>[\s\S]*?<\/span>\s*([\s\S]*?)<\/a>/.exec(block)?.[1]?.replace(/<[^>]+>/g, "").trim() ??
+      /title="([^"]*)"/.exec(block)?.[1] ??
+      "";
     const locked = /lock|未开放|未解锁|gray-btn|btn-locked/.test(block);
     if (locked) hasLocked = true;
-    if (id || knowledgeId) {
+    if (knowledgeId) {
       points.push({
         id,
         knowledgeId,

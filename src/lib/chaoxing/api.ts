@@ -162,12 +162,26 @@ export async function fetchChapters(
   c: { clazzId: string; courseId: string; cpi: string },
 ): Promise<CourseChapter[]> {
   const client = new CxClient(cookies);
+  const referer =
+    `https://mooc1.chaoxing.com/visit/interaction?clazzid=${c.clazzId}&courseid=${c.courseId}`;
+
+  // 1. 经中间页拿到 enc（302 → mycourse/stu?enc=xxx）
+  const midUrl =
+    `https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid=${c.courseId}` +
+    `&clazzid=${c.clazzId}&cpi=${c.cpi}&ismooc2=1&v=2`;
+  const mid = await client.get(midUrl, { headers: { Referer: referer } });
+  const enc =
+    /[?&]enc=([0-9a-f]+)/i.exec(mid.finalUrl)?.[1] ??
+    /[?&]enc=([0-9a-f]+)/i.exec(mid.text)?.[1] ??
+    "";
+  if (!enc) throw new ForbiddenError("获取课程 enc 失败，可能需要重新登录");
+
+  // 2. 拉取章节树页面（studentcourse，注意参数为小写）
   const url =
-    `https://mooc1.chaoxing.com/mycourse/backclazzdata?clazzid=${c.clazzId}&courseid=${c.courseId}&cpi=${c.cpi}`;
+    `https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse` +
+    `?courseid=${c.courseId}&clazzid=${c.clazzId}&cpi=${c.cpi}&enc=${enc}`;
   const r = await client.get(url, {
-    headers: {
-      Referer: `https://mooc1.chaoxing.com/visit/interaction?clazzid=${c.clazzId}&courseid=${c.courseId}`,
-    },
+    headers: { Referer: `https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu` },
   });
   if (r.status === 403) throw new ForbiddenError("章节列表返回 403");
   const { points } = decodeChapterList(r.text);

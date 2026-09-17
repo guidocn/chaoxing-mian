@@ -14,7 +14,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     api
       .get<MeResponse>("/api/auth/me")
       .then((res) => {
-        if (!res.authenticated) {
+        if (!res.ok || !res.authenticated || !res.user) {
           router.replace("/login");
         } else if (res.user.role !== "admin") {
           router.replace("/dashboard");

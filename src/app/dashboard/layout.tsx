@@ -18,7 +18,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     api
       .get<MeResponse>("/api/auth/me")
       .then((res) => {
-        if (!res.authenticated) {
+        if (!res.ok || !res.authenticated || !res.user) {
           router.replace("/login");
           return;
         }

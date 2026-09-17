@@ -8,6 +8,7 @@ export async function GET() {
   const { user } = ctx;
   return Response.json({
     ok: true,
+    authenticated: true,
     user: {
       id: user.id,
       email: user.email,

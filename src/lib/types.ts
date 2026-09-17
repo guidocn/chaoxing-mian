@@ -97,7 +97,8 @@ export interface CourseRow {
 // ===== 前端 DTO（camelCase） =====
 
 export interface MeResponse {
-  authenticated: boolean;
+  ok?: boolean;
+  authenticated?: boolean;
   user: {
     id: number;
     email: string;

@@ -12,6 +12,26 @@ import type { DBAdapter, Row } from "@/types/env";
 
 type Table = Record<string, Row>;
 
+// 通过 Node 20+ 的 process.getBuiltinModule 获取内置模块。
+// 不写 import 语句，避免 Edge 打包器（esbuild）解析 path/fs 时报错；
+// Edge 环境下 process.getBuiltinModule 不存在，返回 null（生产走 D1，不会走到本地存储）。
+type NodeBuiltins = {
+  path: { join: (...parts: string[]) => string };
+  fs: {
+    access: (p: string) => Promise<void>;
+    readFile: (p: string, enc: string) => Promise<string>;
+    writeFile: (p: string, data: string, enc: string) => Promise<void>;
+  };
+};
+function getNodeBuiltins(): NodeBuiltins | null {
+  const proc = (globalThis as { process?: { getBuiltinModule?: (name: string) => unknown } }).process;
+  if (!proc?.getBuiltinModule) return null;
+  const path = proc.getBuiltinModule("path") as NodeBuiltins["path"] | undefined;
+  const fs = proc.getBuiltinModule("fs/promises") as NodeBuiltins["fs"] | undefined;
+  if (!path || !fs) return null;
+  return { path, fs };
+}
+
 const TABLES = [
   "users",
   "cx_accounts",
@@ -34,8 +54,9 @@ class LocalDB implements DBAdapter {
   private autoSeq = new Map<string, number>();
 
   async init(): Promise<void> {
-    const path = await import(/* webpackIgnore: true */ "path");
-    const fs = await import(/* webpackIgnore: true */ "fs/promises");
+    const mods = getNodeBuiltins();
+    if (!mods) return;
+    const { path, fs } = mods;
     this.filePath = path.join(process.cwd(), ".local-db.json");
     let loaded: Record<string, Table> = {};
     try {
@@ -51,7 +72,9 @@ class LocalDB implements DBAdapter {
 
   private async persist(): Promise<void> {
     if (!this.filePath) return;
-    const fs = await import(/* webpackIgnore: true */ "fs/promises");
+    const mods = getNodeBuiltins();
+    if (!mods) return;
+    const { fs } = mods;
     const data: Record<string, Table> = {};
     for (const [k, v] of this.tables) data[k] = v;
     await fs.writeFile(this.filePath, JSON.stringify(data), "utf-8");

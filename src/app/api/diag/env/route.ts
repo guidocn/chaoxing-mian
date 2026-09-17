@@ -18,7 +18,8 @@ export async function GET() {
       ctxErr = `getCloudflareContext 抛错: ${String(e)}`;
     }
 
-    const db = env.DB as { prepare?: (sql: string) => { first: () => Promise<Record<string, unknown> | null> } } | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = (env as Record<string, unknown>).DB as any;
     if (db) {
       try {
         const res = await db.prepare("SELECT COUNT(*) AS c FROM users").first();

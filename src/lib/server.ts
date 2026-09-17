@@ -5,10 +5,11 @@ import { SESSION_COOKIE, verifySessionToken } from "./session";
 import type { UserRow } from "./types";
 import type { DBAdapter } from "@/types/env";
 // 静态导入：next-on-pages 运行时库。本地 next dev 下该模块可安装但调用会抛错，走 catch 降级。
-import { getRequestContext, getCloudflareContext } from "@cloudflare/next-on-pages";
+// 注意：@cloudflare/next-on-pages 只导出 getRequestContext（没有 getCloudflareContext）。
+import { getRequestContext } from "@cloudflare/next-on-pages";
 
 // 运行时绑定与密钥：
-// - Cloudflare Pages/Workers：通过 getRequestContext().env（Edge 运行时推荐）拿到 D1 绑定 DB 与变量
+// - Cloudflare Pages/Workers：通过 getRequestContext().env（Edge 运行时官方 API）拿到 D1 绑定 DB 与变量
 // - 本地 next dev：调用抛错，退化为 process.env + JSON 文件存储
 export interface RuntimeContext {
   db: DBAdapter;
@@ -23,18 +24,9 @@ async function cloudflareEnv(): Promise<{
   ADMIN_SETUP_CODE?: string;
 }> {
   try {
-    // 优先 getRequestContext：官方推荐、在 Edge 请求上下文中可靠拿到 env。
-    // 注意：不要在 await import() 之后再调用（异步边界可能导致上下文丢失、返回空 env）。
-    let env: Record<string, unknown> | undefined;
-    try {
-      env = getRequestContext().env as Record<string, unknown>;
-    } catch {
-      env = undefined;
-    }
-    if (!env || Object.keys(env).length === 0) {
-      // fallback：getCloudflareContext（部分运行环境仍可用）
-      env = getCloudflareContext().env as Record<string, unknown>;
-    }
+    // getRequestContext 必须在请求处理中同步调用（勿放在 await 之后）。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = getRequestContext().env as Record<string, unknown>;
     return {
       DB: env?.DB as D1Database | undefined,
       APP_SECRET: env?.APP_SECRET as string | undefined,

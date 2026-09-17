@@ -59,10 +59,10 @@ export default function AccountDetailPage() {
       api.get<{ courses: CourseRow[] }>(`/api/accounts/${accountId}/courses`),
       api.get<{ logs: TaskLog[] }>(`/api/accounts/${accountId}/task/logs`),
     ]);
-    setAccount(accRes.account);
-    setTask(accRes.task);
-    setCourses(courseRes.courses);
-    setLogs(logRes.logs);
+    setAccount(accRes.account ?? null);
+    setTask(accRes.task ?? null);
+    setCourses(courseRes.courses ?? []);
+    setLogs(logRes.logs ?? []);
     setLoading(false);
   }, [accountId]);
 

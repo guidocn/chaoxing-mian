@@ -4,7 +4,7 @@ import { verifyPassword } from "@/lib/auth-password";
 import { createSessionToken, buildSetCookie, SESSION_MAX_AGE } from "@/lib/session";
 import { getRuntime } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { email?: string; password?: string };

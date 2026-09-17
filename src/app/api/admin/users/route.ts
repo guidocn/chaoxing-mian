@@ -2,7 +2,7 @@ import { listAllCxAccounts, listAllTasks, listUsers } from "@/lib/db/repo";
 import { requireAdmin } from "@/lib/server";
 import { serializeAdminUser } from "@/lib/serialize";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function GET() {
   const ctx = await requireAdmin();

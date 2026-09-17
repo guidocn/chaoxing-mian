@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/repo";
 import { requireAdmin } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 // body: { action: 'promote' | 'demote' | 'ban' | 'unban' | 'delete' }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

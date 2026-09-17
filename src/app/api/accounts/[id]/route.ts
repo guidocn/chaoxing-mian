@@ -10,7 +10,7 @@ import { requireUser } from "@/lib/server";
 import { serializeAccount } from "@/lib/serialize";
 import { countCoursesByAccount } from "@/lib/db/repo";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 async function loadOwned(ctx: Awaited<ReturnType<typeof requireUser>>, id: number) {
   if ("error" in ctx) return null;

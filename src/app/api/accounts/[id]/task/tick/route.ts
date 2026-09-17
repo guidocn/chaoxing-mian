@@ -4,7 +4,7 @@ import { nowSec } from "@/lib/db";
 import { reloginAccount, runTick } from "@/lib/engine/tick";
 import { requireUser } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const maxDuration = 30;
 
 // 推进一次任务（前端轮询调用）

@@ -3,7 +3,7 @@ import { getCxAccount, getTaskByAccount, updateTaskRow } from "@/lib/db/repo";
 import { nowSec } from "@/lib/db";
 import { requireUser } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 // 任务控制  body: { action: 'start' | 'pause' | 'reset' }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

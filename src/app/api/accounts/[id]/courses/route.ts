@@ -4,7 +4,7 @@ import type { CookieJar } from "@/lib/chaoxing/client";
 import { requireUser } from "@/lib/server";
 import { serializeCourse } from "@/lib/serialize";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 // 获取已缓存课程
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {

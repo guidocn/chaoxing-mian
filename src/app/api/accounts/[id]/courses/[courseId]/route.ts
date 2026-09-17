@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getCxAccount } from "@/lib/db/repo";
 import { requireUser } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 // 勾选/取消勾选课程（:courseId 为超星课程 ID）
 export async function PUT(

@@ -10,7 +10,7 @@ import {
 import { requireUser } from "@/lib/server";
 import { serializeAccount } from "@/lib/serialize";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 // 列出当前用户绑定的超星账号
 export async function GET() {

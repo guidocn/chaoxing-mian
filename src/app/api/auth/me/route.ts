@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function GET() {
   const ctx = await requireUser();

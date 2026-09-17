@@ -5,7 +5,7 @@ import { appEncrypt } from "@/lib/crypto";
 import { chaoxingLogin } from "@/lib/chaoxing/api";
 import { requireUser } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 // 立即登录超星（用保存的密码，或前端传入的新手机号/密码）
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

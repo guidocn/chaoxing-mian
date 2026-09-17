@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { testTikuConnection, type TikuConfig, type TikuProvider } from "@/lib/chaoxing/tiku";
 import { requireUser } from "@/lib/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   const ctx = await requireUser();

@@ -1,4 +1,4 @@
-name = "chaoxing-mian"
+name = "cx_auto_study"
 compatibility_date = "2026-09-13"
 compatibility_flags = ["nodejs_compat"]
 
@@ -10,8 +10,8 @@ compatibility_flags = ["nodejs_compat"]
 #      npx wrangler d1 execute cx_auto_study --remote --file=./schema.sql
 [[d1_databases]]
 binding = "DB"
-database_name = "chaoxing-mian"
-database_id = "a57f7dcd-48e6-41d1-a265-4456e876a351"
+database_name = "cx_auto_study"
+database_id = "d642f202-0776-42dc-8249-a16d34dd2f0f"
 
 [vars]
 ENVIRONMENT = "production"
@@ -22,3 +22,4 @@ ENVIRONMENT = "production"
 # 本地开发可在 .dev.vars 中设置：
 #   APP_SECRET="dev-only-please-change-to-a-long-random-secret"
 #   ADMIN_SETUP_CODE="setup-code"
+  

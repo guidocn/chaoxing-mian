@@ -34,8 +34,8 @@ class LocalDB implements DBAdapter {
   private autoSeq = new Map<string, number>();
 
   async init(): Promise<void> {
-    const path = await import("path");
-    const fs = await import("fs/promises");
+    const path = await import(/* webpackIgnore: true */ "path");
+    const fs = await import(/* webpackIgnore: true */ "fs/promises");
     this.filePath = path.join(process.cwd(), ".local-db.json");
     let loaded: Record<string, Table> = {};
     try {
@@ -51,7 +51,7 @@ class LocalDB implements DBAdapter {
 
   private async persist(): Promise<void> {
     if (!this.filePath) return;
-    const fs = await import("fs/promises");
+    const fs = await import(/* webpackIgnore: true */ "fs/promises");
     const data: Record<string, Table> = {};
     for (const [k, v] of this.tables) data[k] = v;
     await fs.writeFile(this.filePath, JSON.stringify(data), "utf-8");

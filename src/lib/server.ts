@@ -4,10 +4,12 @@ import { getUserById } from "./db/repo";
 import { SESSION_COOKIE, verifySessionToken } from "./session";
 import type { UserRow } from "./types";
 import type { DBAdapter } from "@/types/env";
+// 静态导入：next-on-pages 运行时库。本地 next dev 下该模块可安装但调用会抛错，走 catch 降级。
+import { getRequestContext, getCloudflareContext } from "@cloudflare/next-on-pages";
 
 // 运行时绑定与密钥：
-// - Cloudflare Pages/Workers：通过 getCloudflareContext().env 拿到 D1 绑定 DB 与变量
-// - 本地 next dev：退化为 process.env + JSON 文件存储
+// - Cloudflare Pages/Workers：通过 getRequestContext().env（Edge 运行时推荐）拿到 D1 绑定 DB 与变量
+// - 本地 next dev：调用抛错，退化为 process.env + JSON 文件存储
 export interface RuntimeContext {
   db: DBAdapter;
   secret?: string;
@@ -21,18 +23,23 @@ async function cloudflareEnv(): Promise<{
   ADMIN_SETUP_CODE?: string;
 }> {
   try {
-    // 仅在 Cloudflare 运行时存在；本地 dev 下该模块不可用，走 catch
-    const mod = (await import("@cloudflare/next-on-pages")) as {
-      getCloudflareContext?: () => {
-        env: {
-          DB?: D1Database;
-          APP_SECRET?: string;
-          ADMIN_SETUP_CODE?: string;
-        };
-      };
+    // 优先 getRequestContext：官方推荐、在 Edge 请求上下文中可靠拿到 env。
+    // 注意：不要在 await import() 之后再调用（异步边界可能导致上下文丢失、返回空 env）。
+    let env: Record<string, unknown> | undefined;
+    try {
+      env = getRequestContext().env as Record<string, unknown>;
+    } catch {
+      env = undefined;
+    }
+    if (!env || Object.keys(env).length === 0) {
+      // fallback：getCloudflareContext（部分运行环境仍可用）
+      env = getCloudflareContext().env as Record<string, unknown>;
+    }
+    return {
+      DB: env?.DB as D1Database | undefined,
+      APP_SECRET: env?.APP_SECRET as string | undefined,
+      ADMIN_SETUP_CODE: env?.ADMIN_SETUP_CODE as string | undefined,
     };
-    const ctx = mod.getCloudflareContext?.();
-    return ctx?.env ?? {};
   } catch {
     return {};
   }

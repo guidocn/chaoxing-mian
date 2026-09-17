@@ -1,25 +1,22 @@
+import { getRequestContext, getCloudflareContext } from "@cloudflare/next-on-pages";
+
 export const runtime = "edge";
 
-// 临时诊断接口：检查运行时 env 里是否有 D1 绑定（DB），以及 D1 是否可查询。
-// 确认问题后请删除此文件。
+// 临时诊断接口：对比 getRequestContext 与 getCloudflareContext 两种方式读取运行时 env，
+// 并直接对 D1 执行查询。确认问题后请删除此文件。
 export async function GET() {
-  let env: Record<string, unknown> = {};
-  let ctxErr = "";
-  let dbTest = "env.DB 不存在";
+  let rcKeys: string[] = [];
+  let rcErr = "";
+  let cfKeys: string[] = [];
+  let cfErr = "";
+  let dbTest = "getRequestContext().env.DB 不存在";
 
+  // 方式一：getRequestContext（官方推荐的 Edge runtime API）
   try {
-    const mod = (await import("@cloudflare/next-on-pages")) as {
-      getCloudflareContext?: () => { env?: Record<string, unknown> };
-    };
-    try {
-      const ctx = mod.getCloudflareContext?.();
-      env = ctx?.env ?? {};
-    } catch (e) {
-      ctxErr = `getCloudflareContext 抛错: ${String(e)}`;
-    }
-
+    const rc = getRequestContext();
+    rcKeys = Object.keys(rc?.env ?? {});
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const db = (env as Record<string, unknown>).DB as any;
+    const db = (rc?.env as Record<string, unknown> | undefined)?.DB as any;
     if (db) {
       try {
         const res = await db.prepare("SELECT COUNT(*) AS c FROM users").first();
@@ -29,13 +26,20 @@ export async function GET() {
       }
     }
   } catch (e) {
-    ctxErr = `import 失败: ${String(e)}`;
+    rcErr = `getRequestContext 抛错: ${String(e)}`;
+  }
+
+  // 方式二：getCloudflareContext（项目原用 API）
+  try {
+    const cf = getCloudflareContext();
+    cfKeys = Object.keys(cf?.env ?? {});
+  } catch (e) {
+    cfErr = `getCloudflareContext 抛错: ${String(e)}`;
   }
 
   return Response.json({
-    keys: Object.keys(env),
-    hasDB: Boolean(env.DB),
+    requestContext: { keys: rcKeys, err: rcErr },
+    cloudflareContext: { keys: cfKeys, err: cfErr },
     dbTest,
-    ctxErr,
   });
 }

@@ -4,9 +4,10 @@ import {
   createTask,
   getCxAccount,
   getTaskByAccount,
+  listRecentLogs,
 } from "@/lib/db/repo";
 import { requireUser } from "@/lib/server";
-import { serializeAccount, serializeTask } from "@/lib/serialize";
+import { serializeAccount, serializeLog, serializeTask } from "@/lib/serialize";
 
 export const runtime = "edge";
 
@@ -23,10 +24,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const task = await getTaskByAccount(ctx.db, account.id);
   const total = await countCoursesByAccount(ctx.db, account.id);
   const selected = await countCoursesByAccount(ctx.db, account.id, 1);
+  const logs = task ? await listRecentLogs(ctx.db, task.id) : [];
   return Response.json({
     ok: true,
     account: serializeAccount(account, task, total, selected),
     task: serializeTask(task),
+    logs: logs.map(serializeLog),
   });
 }
 

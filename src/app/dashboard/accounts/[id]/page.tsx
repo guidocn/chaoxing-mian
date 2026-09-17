@@ -54,15 +54,16 @@ export default function AccountDetailPage() {
   const logBoxRef = useRef<HTMLDivElement>(null);
 
   const loadAll = useCallback(async () => {
-    const [accRes, courseRes, logRes] = await Promise.all([
-      api.get<{ account: CxAccount; task: TaskRow | null }>(`/api/accounts/${accountId}/task`),
+    const [accRes, courseRes] = await Promise.all([
+      api.get<{ account: CxAccount; task: TaskRow | null; logs?: TaskLog[] }>(
+        `/api/accounts/${accountId}/task`,
+      ),
       api.get<{ courses: CourseRow[] }>(`/api/accounts/${accountId}/courses`),
-      api.get<{ logs: TaskLog[] }>(`/api/accounts/${accountId}/task/logs`),
     ]);
     setAccount(accRes.account ?? null);
     setTask(accRes.task ?? null);
     setCourses(courseRes.courses ?? []);
-    setLogs(logRes.logs ?? []);
+    setLogs(accRes.logs ?? []);
     setLoading(false);
   }, [accountId]);
 

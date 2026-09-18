@@ -153,6 +153,8 @@ export interface CourseChapter {
   knowledgeId: string;
   title: string;
   locked: boolean;
+  /** 章节任务点全部完成（已刷过，可跳过） */
+  done?: boolean;
   url: string;
 }
 
@@ -197,6 +199,7 @@ export async function fetchChapters(
       knowledgeId: p.knowledgeId || chapterId,
       title: p.title || `章节 ${chapterId}`,
       locked: p.locked,
+      done: p.done,
       url: studyUrl,
     });
   }

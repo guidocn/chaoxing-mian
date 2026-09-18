@@ -75,6 +75,8 @@ export interface ChapterPoint {
   cpi: string;
   label: string;
   locked: boolean;
+  /** 章节任务点是否全部完成（新版 studentcourse 的 icon_yiwanc 标记） */
+  done?: boolean;
 }
 
 /** 解析章节列表页（mooc2-ans mycourse/studentcourse 返回的 HTML）中的知识点节点 */
@@ -102,6 +104,8 @@ export function decodeChapterList(html: string): { hasLocked: boolean; points: C
       /title="([^"]*)"/.exec(block)?.[1] ??
       "";
     const locked = /lock|未开放|未解锁|gray-btn|btn-locked/.test(block);
+    // 新版章节完成标记：catalog_state icon_yiwanc（全部任务点已完成）
+    const done = /icon_yiwanc|已完成/.test(block);
     if (locked) hasLocked = true;
     if (knowledgeId) {
       points.push({
@@ -113,6 +117,7 @@ export function decodeChapterList(html: string): { hasLocked: boolean; points: C
         cpi: "",
         label: "",
         locked,
+        done,
       });
     }
   }
@@ -141,6 +146,7 @@ export function decodeChapterList(html: string): { hasLocked: boolean; points: C
         cpi: "",
         label: "",
         locked: false,
+        done: false,
       });
     }
     diagParts.push(`knowledgeid_scan=${points.length}`);

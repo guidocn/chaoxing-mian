@@ -25,10 +25,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (account.login_status !== "online") {
         return Response.json({ ok: false, message: "请先登录超星账号" }, { status: 400 });
       }
+      // 保留已有进度（state 非空时续刷：刷过的章节跳过、刷一半的视频从断点继续），
+      // 想从头重刷请先点"重置"
+      const resumeState = task.state && task.state !== "{}" && task.state !== "" ? task.state : "{}";
       await updateTaskRow(ctx.db, task.id, {
         status: "running",
         error_message: "",
-        state: "{}",
+        state: resumeState,
         started_at: task.started_at ?? nowSec(),
         finished_at: null,
         updated_at: nowSec(),

@@ -241,9 +241,14 @@ export async function runTick(
           await log("warn", `《${course.title || "超星课程"}》章节为空，跳过该课程（${diag ?? ""}）`);
           return advanceCourse(state, save, log);
         }
+        const doneCount = chapters.filter((c) => c.done).length;
+        if (doneCount > 0) {
+          await log("info", `《${course.title}》共 ${chapters.length} 个章节（其中 ${doneCount} 个已完成，将跳过）`);
+        } else {
+          await log("info", `《${course.title}》共 ${chapters.length} 个章节`);
+        }
         state.chapters = chapters;
         state.chapterIndex = 0;
-        await log("info", `《${course.title}》共 ${chapters.length} 个章节`);
         state.phase = "card";
         await save({ current_course: course.title }, state);
         return { done: false, status: "running", state, progress: progressOf(state) };
@@ -260,6 +265,15 @@ export async function runTick(
       }
       if (chapter.locked && task.skip_locked === 1) {
         await log("info", `跳过未开放章节：${chapter.title}`);
+        state.chapterIndex += 1;
+        state.phase = "card";
+        await save({}, state);
+        return { done: false, status: "running", state, progress: progressOf(state) };
+      }
+      // 已完成的章节（超星 studentcourse 的 icon_yiwanc 标记）：跳过，避免重复刷
+      if (chapter.done) {
+        await log("success", `已完成章节，跳过：${chapter.title}`);
+        bumpCourse(state, course.courseId, "done");
         state.chapterIndex += 1;
         state.phase = "card";
         await save({}, state);
@@ -294,6 +308,15 @@ export async function runTick(
         const videos = parseVideoTasks(card.html);
         if (videos.length > 0) {
           const v = videos[0];
+          // 任务点已完成（卡片 isPassed=true）：跳过，避免重复刷
+          if (v.isPassed) {
+            await log("success", `任务点已完成，跳过：${chapter.title}`);
+            bumpCourse(state, course.courseId, "done");
+            state.chapterIndex += 1;
+            state.phase = "card";
+            await save({}, state);
+            return { done: false, status: "running", state, progress: progressOf(state) };
+          }
           state.taskIndex = 0;
           bumpCourse(state, course.courseId, "total");
           state.objectId = v.objectId;

@@ -1,0 +1,18 @@
+import { readFileSync } from 'node:fs';
+const mod = await import('./src/lib/chaoxing/decode.ts');
+const html = readFileSync('/home/user/Doubao/chats/38441492237308162/capture/studentcourse.html', 'utf8');
+const { points, diag } = mod.decodeChapterList(html);
+const doneChapters = points.filter(p => p.done);
+console.log('章节数:', points.length, '| 已完成标记:', doneChapters.length, '| diag:', diag);
+const k21 = points.find(p => p.knowledgeId === '1227407382');
+const k22 = points.find(p => p.knowledgeId === '1227407383');
+console.log('2.1 (应已完成) done=', k21?.done, '| 2.2 (未完成) done=', k22?.done);
+console.log('TEST1:', k21?.done === true && k22?.done === false ? 'PASS' : 'FAIL');
+const mod2 = await import('./src/lib/chaoxing/video.ts');
+const c21 = readFileSync('/home/user/Doubao/chats/38441492237308162/capture/cards-21.html', 'utf8');
+const c22 = readFileSync('/home/user/Doubao/chats/38441492237308162/capture/cards-22.html', 'utf8');
+const t21 = mod2.parseVideoTasks(c21);
+const t22 = mod2.parseVideoTasks(c22);
+console.log('2.1 视频: isPassed=', t21[0]?.isPassed, 'mid=', t21[0]?.mid?.slice(0,8));
+console.log('2.2 视频: isPassed=', t22[0]?.isPassed, 'mid=', t22[0]?.mid?.slice(0,8));
+console.log('TEST2:', t21[0]?.isPassed === true && t22[0]?.isPassed === false ? 'PASS' : 'FAIL');

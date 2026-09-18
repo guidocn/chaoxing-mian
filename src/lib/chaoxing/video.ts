@@ -255,18 +255,134 @@ interface VideoTaskParsed {
   userid: string;
   cpiFromUrl: string;
   mid: string;
+  /** 任务点是否已完成（卡片 attachments.isPassed） */
+  isPassed: boolean;
+}
+
+/** 从 start 指向的 { 开始，括号配平提取完整 JSON 对象文本 */
+function extractBalancedJson(s: string, start: number): string | null {
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else {
+      if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) return s.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
 }
 
 /**
  * 从卡片 HTML（knowledge/cards）解析视频任务点参数。
  * 新版 cards 页面同时携带：
- *  - mArg = {...attachments:[{jobid, otherInfo, attDurationEnc, objectId, ...}]}
+ *  - mArg = {...attachments:[{jobid, otherInfo, attDurationEnc, objectId, isPassed, ...}]}
  *  - defaults = {...reportUrl, fid, userid, ...}
  */
 export function parseVideoTasks(html: string): VideoTaskParsed[] {
   const tasks: VideoTaskParsed[] = [];
 
-  // defaults 里的 reportUrl / fid / userid
+  // JSON 直解：新版 cards 接口直接返回 JSON（attachments 数组，键序 headOffset 开头），
+  // 正则 attRe 以 {"begins" 开头匹配不到，需先尝试 JSON.parse
+  try {
+    const trimmed = html.trim();
+    if (trimmed.startsWith("{")) {
+      const j = JSON.parse(trimmed) as {
+        attachments?: Array<Record<string, unknown>>;
+        defaults?: Record<string, unknown>;
+      };
+      const def = j.defaults ?? {};
+      const reportUrl =
+        (typeof def.reportUrl === "string" ? def.reportUrl : "") ||
+        /"reportUrl"\s*:\s*"([^"]+)"/.exec(html)?.[1] ||
+        "";
+      const fid = (typeof def.fid === "string" ? def.fid : "") || (typeof def.belongschoolid === "string" ? def.belongschoolid : "") || "";
+      const userid = (typeof def.userid === "string" ? def.userid : "") || "";
+      const cpiFromUrl = /log\/a\/(\d+)/.exec(reportUrl)?.[1] ?? "";
+      const atts = j.attachments ?? [];
+      for (const a of atts) {
+        const objectId = typeof a.objectId === "string" ? a.objectId : "";
+        if (!/^[0-9a-f]{20,}$/.test(objectId)) continue;
+        const prop = (a.property ?? {}) as Record<string, unknown>;
+        tasks.push({
+          objectId,
+          jobid: typeof a.jobid === "string" ? a.jobid : String(a.jobid ?? ""),
+          otherInfo: typeof a.otherInfo === "string" ? a.otherInfo : "",
+          rt: "1",
+          dtoken: "",
+          duration: String(typeof a.attDuration === "number" ? a.attDuration : a.attDuration ?? "0"),
+          reportUrl,
+          fid,
+          attDurationEnc: typeof a.attDurationEnc === "string" ? a.attDurationEnc : "",
+          userid,
+          cpiFromUrl,
+          mid: typeof a.mid === "string" ? a.mid : String(a.mid ?? prop.mid ?? ""),
+          isPassed: a.isPassed === true,
+        });
+      }
+      if (tasks.length > 0) return tasks;
+    }
+  } catch {
+    // 非纯 JSON，走 mArg/正则路径
+  }
+
+  // mArg 提取：卡片页面标准载体 mArg = {"hiddenConfig":...,"attachments":[...]}
+  // attachments 键序以 headOffset 开头（非 {"begins"），attRe 匹配不到，需括号配平提取后 JSON.parse
+  try {
+    const mArgStart = html.indexOf("mArg = {");
+    const startIdx = mArgStart >= 0 ? mArgStart + 7 : html.indexOf("attachments = {") >= 0 ? html.indexOf("attachments = {") + 15 : -1;
+    if (startIdx >= 0) {
+      const jsonText = extractBalancedJson(html, startIdx);
+      if (jsonText) {
+        const parsed = JSON.parse(jsonText) as {
+          attachments?: Array<Record<string, unknown>>;
+          defaults?: Record<string, unknown>;
+        };
+        const def = (parsed.defaults ?? {}) as Record<string, unknown>;
+        const reportUrl =
+          (typeof def.reportUrl === "string" ? def.reportUrl : "") ||
+          /"reportUrl"\s*:\s*"([^"]+)"/.exec(html)?.[1] ||
+          "";
+        const fid = (typeof def.fid === "string" ? def.fid : "") || (typeof def.belongschoolid === "string" ? def.belongschoolid : "") || "";
+        const userid = (typeof def.userid === "string" ? def.userid : "") || "";
+        const cpiFromUrl = /log\/a\/(\d+)/.exec(reportUrl)?.[1] ?? "";
+        const atts = parsed.attachments ?? [];
+        for (const a of atts) {
+          const objectId = typeof a.objectId === "string" ? a.objectId : "";
+          if (!/^[0-9a-f]{20,}$/.test(objectId)) continue;
+          const prop = (a.property ?? {}) as Record<string, unknown>;
+          tasks.push({
+            objectId,
+            jobid: typeof a.jobid === "string" ? a.jobid : String(a.jobid ?? ""),
+            otherInfo: typeof a.otherInfo === "string" ? a.otherInfo : "",
+            rt: "1",
+            dtoken: "",
+            duration: String(typeof a.attDuration === "number" ? a.attDuration : a.attDuration ?? "0"),
+            reportUrl,
+            fid,
+            attDurationEnc: typeof a.attDurationEnc === "string" ? a.attDurationEnc : "",
+            userid,
+            cpiFromUrl,
+            mid: typeof a.mid === "string" ? a.mid : String(a.mid ?? prop.mid ?? ""),
+            isPassed: a.isPassed === true,
+          });
+        }
+        if (tasks.length > 0) return tasks;
+      }
+    }
+  } catch {
+    // mArg 解析失败，走正则路径
+  }
+
   let reportUrl = "";
   let fid = "";
   let userid = "";
@@ -307,6 +423,8 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
     const attDur = /"attDuration"\s*:\s*(\d+)/.exec(block);
     // mid：真实播放器 V2 会话初始化用 mid（initdatawithviewerV2?mid=...）
     const midM = /"mid"\s*:\s*"(\d+)"/.exec(block);
+    // 任务点完成状态（超星服务端权威标记）
+    const passedM = /"isPassed"\s*:\s*(true|false)/.exec(block);
     if (!objM) continue;
     tasks.push({
       objectId: objM[1],
@@ -321,6 +439,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
       userid,
       cpiFromUrl,
       mid: midM?.[1] ?? "",
+      isPassed: passedM?.[1] === "true",
     });
   }
 
@@ -352,6 +471,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
         userid,
         cpiFromUrl,
         mid: mids[i] ?? "",
+        isPassed: /"isPassed"\s*:\s*true/.test(html),
       });
     }
   }

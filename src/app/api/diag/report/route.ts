@@ -27,6 +27,7 @@ interface EngineStateLite {
   fid: string;
   attDurationEnc: string;
   userid: string;
+  mid: string;
   courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string }>;
   chapters: Array<{ knowledgeId: string; title: string }>;
 }
@@ -54,10 +55,20 @@ export async function GET() {
     // 1. 重新拉 dtoken/key
     const cfg = await fetchVideoConfig(cookies, objectId, state.fid || account.fid || undefined);
 
-    // 1.5 初始化观看会话
+    // 1.5 初始化观看会话（V2 会话登记：心跳被计入时长的前提）
     let init = null;
-    if (cfg.key) {
-      init = await initVideoSession(cookies, objectId, cfg.key, state.fid || account.fid || undefined);
+    try {
+      init = await initVideoSession(cookies, {
+        objectId,
+        mid: state.mid || "",
+        cpi: course.cpi,
+        clazzId: course.clazzId,
+        courseId: course.courseId,
+        key: cfg.key || "",
+        fid: state.fid || account.fid || undefined,
+      });
+    } catch (e) {
+      init = { status: 0, ok: false, body: String(e), url: "" };
     }
 
     // 2. 发起一次 30s 心跳上报

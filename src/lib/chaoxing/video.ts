@@ -254,6 +254,7 @@ interface VideoTaskParsed {
   attDurationEnc: string;
   userid: string;
   cpiFromUrl: string;
+  mid: string;
 }
 
 /**
@@ -304,6 +305,8 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
     const otherM = /"otherInfo"\s*:\s*"([^"]+)"/.exec(block);
     const attDurM = /"attDurationEnc"\s*:\s*"([0-9a-f]+)"/.exec(block);
     const attDur = /"attDuration"\s*:\s*(\d+)/.exec(block);
+    // mid：真实播放器 V2 会话初始化用 mid（initdatawithviewerV2?mid=...）
+    const midM = /"mid"\s*:\s*"(\d+)"/.exec(block);
     if (!objM) continue;
     tasks.push({
       objectId: objM[1],
@@ -317,6 +320,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
       attDurationEnc: attDurM?.[1] ?? "",
       userid,
       cpiFromUrl,
+      mid: midM?.[1] ?? "",
     });
   }
 
@@ -332,6 +336,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
     const objects = Array.from(html.matchAll(objectRe), (m) => m[1]);
     const jobids = Array.from(html.matchAll(jobRe), (m) => m[1]);
     const others = Array.from(html.matchAll(otherRe), (m) => m[1]);
+    const mids = Array.from(html.matchAll(/mid["':=\s]+["']?(\d+)/gi), (m) => m[1]);
     const len = Math.max(objects.length, jobids.length);
     for (let i = 0; i < len; i++) {
       tasks.push({
@@ -346,6 +351,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
         attDurationEnc: attDurEncRe.exec(html)?.[1] ?? "",
         userid,
         cpiFromUrl,
+        mid: mids[i] ?? "",
       });
     }
   }
@@ -392,27 +398,50 @@ export async function fetchVideoConfig(
 }
 
 /**
- * 初始化视频观看会话（播放器在 status 之后调用 richvideo/initdatawithviewer）。
- * 超星通过该接口下发视频流地址，并在服务端登记"开始观看"会话；
- * 跳过它可能导致后续 log/a 心跳不被计入学习时长。
+ * 初始化视频观看会话（真实播放器链路）：
+ * 1) initdatawithviewerV2?mid={mid}&cpi={cpi}&classid={classId}&courseid={courseId}
+ *    必须携带完整浏览器请求头（Referer: video/index.html、Origin、X-Requested-With），
+ *    否则 403；V2 是超星 2026-09 新版"会话登记"入口，缺它则心跳 200 但 isPassed 恒 false（不计时长）。
+ * 2) getpoints?courseid=&mid= 会话确认（真实播放器顺序：status → initV2 → getpoints → 心跳）。
  */
 export async function initVideoSession(
   cookies: CookieJar,
-  objectId: string,
-  key: string,
-  fid?: string,
+  c: {
+    objectId: string;
+    mid: string;
+    cpi: string;
+    clazzId: string;
+    courseId: string;
+    key: string;
+    fid?: string;
+  },
 ): Promise<{ ok: boolean; status: number; body: string; url: string }> {
   const client = new CxClient(cookies);
-  const k = fid || client.getCookie("fid") || "";
-  const url =
-    `https://mooc1.chaoxing.com/richvideo/initdatawithviewer` +
-    `?objectId=${objectId}&key=${key}&k=${k}&flag=normal&ro=0&_dc=${Date.now()}`;
-  const r = await client.get(url, {
-    headers: {
-      "X-Requested-With": "XMLHttpRequest",
-      Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
-    },
-    timeout: 20000,
-  });
-  return { ok: r.status === 200, status: r.status, body: (r.text ?? "").slice(0, 300), url };
+  const k = c.fid || client.getCookie("fid") || "";
+  const hdrs = {
+    "X-Requested-With": "XMLHttpRequest",
+    Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
+    Origin: "https://mooc1.chaoxing.com",
+    Accept: "application/json, text/javascript, */*; q=0.01",
+  };
+  // 1. V2 会话初始化（mid 是真实播放器使用的媒体任务 ID）
+  const v2Url =
+    `https://mooc1.chaoxing.com/mooc-ans/richvideo/initdatawithviewerV2` +
+    `?mid=${c.mid}&cpi=${c.cpi}&classid=${c.clazzId}&courseid=${c.courseId}&_dc=${Date.now()}`;
+  const r = await client.get(v2Url, { headers: hdrs, timeout: 20000 });
+  // 2. getpoints 会话确认
+  let gp = { status: 0, text: "" };
+  try {
+    const gpUrl =
+      `https://mooc1.chaoxing.com/ananas/getpoints?courseid=${c.courseId}&mid=${c.mid}&_dc=${Date.now()}`;
+    gp = await client.get(gpUrl, { headers: hdrs, timeout: 15000 });
+  } catch {
+    // getpoints 失败不阻断（V2 成功即可）
+  }
+  return {
+    ok: r.status === 200,
+    status: r.status,
+    body: (r.text ?? "").slice(0, 200) + ` | getpoints:${gp.status} ${(gp.text ?? "").slice(0, 80)}`,
+    url: v2Url,
+  };
 }

@@ -64,6 +64,8 @@ export interface EngineState {
   fid: string;
   attDurationEnc: string;
   userid: string;
+  // V2 会话初始化用的媒体任务 ID（真实播放器 initdatawithviewerV2?mid=）
+  mid: string;
   // 每门课的独立进度
   courseProgress: Array<{ courseId: string; title: string; total: number; done: number }>;
   // 视频完成未确认重试计数
@@ -93,6 +95,7 @@ const initialState: EngineState = {
   fid: "",
   attDurationEnc: "",
   userid: "",
+  mid: "",
   courseProgress: [],
   courses: [],
   chapters: [],
@@ -290,6 +293,7 @@ export async function runTick(
           state.fid = v.fid || "";
           state.attDurationEnc = v.attDurationEnc || "";
           state.userid = v.userid || "";
+          state.mid = v.mid || "";
           let cfg = await fetchVideoConfig(cookies, v.objectId, v.fid);
           // 无时长且无 dtoken：可能是文档任务被误判为视频（PDF/阅读任务）。
           // status 偶发失败会同时丢 duration 与 dtoken，重试一次再判定。
@@ -311,15 +315,22 @@ export async function runTick(
           }
           state.duration = cfg.duration || Number(v.duration) || 0;
           state.dtoken = cfg.dtoken || "";
-          // 初始化观看会话（status 之后播放器会调 richvideo/initdatawithviewer）
-          if (cfg.key) {
-            try {
-              const init = await initVideoSession(cookies, v.objectId, cfg.key, v.fid);
-              if (init.ok) await log("info", `观看会话已初始化：${chapter.title}`);
-              else await log("warn", `会话初始化未成功(${init.status})：${chapter.title}`);
-            } catch {
-              await log("warn", `会话初始化异常，继续尝试上报：${chapter.title}`);
-            }
+          // 初始化观看会话：真实播放器链路 status → initdatawithviewerV2(mid) → getpoints → 心跳。
+          // V2 会话登记是"心跳被确认/计入时长"的关键，缺它则心跳 200 但 isPassed 恒 false。
+          try {
+            const init = await initVideoSession(cookies, {
+              objectId: v.objectId,
+              mid: v.mid || state.mid || "",
+              cpi: course.cpi,
+              clazzId: course.clazzId,
+              courseId: course.courseId,
+              key: cfg.key,
+              fid: v.fid || state.fid,
+            });
+            if (init.ok) await log("info", `观看会话已初始化（V2）：${chapter.title} ${init.body.slice(0, 60)}`);
+            else await log("warn", `会话初始化未成功(${init.status})：${chapter.title}`);
+          } catch (e) {
+            await log("warn", `会话初始化异常(${e instanceof Error ? e.message.slice(0, 60) : e})，继续尝试上报：${chapter.title}`);
           }
           state.reportUrl = v.reportUrl || "";
           state.playingTime = 0;

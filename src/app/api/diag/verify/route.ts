@@ -84,6 +84,7 @@ export async function GET(request: Request) {
     fid: string;
     attDurationEnc: string;
     userid: string;
+    mid: string;
     duration: number;
     dtoken: string;
     key?: string;
@@ -114,6 +115,7 @@ export async function GET(request: Request) {
           fid: v.fid || account.fid || "1888",
           attDurationEnc: v.attDurationEnc || "",
           userid: v.userid || account.uid || "",
+          mid: v.mid || "",
           duration: cfg.duration,
           dtoken: cfg.dtoken || "",
           key: cfg.key,
@@ -158,11 +160,19 @@ export async function GET(request: Request) {
 
   const v = found[videoIdx];
 
-  // 3. 初始化观看会话
+  // 3. 初始化观看会话（V2：mid 参数 + getpoints，真实播放器链路）
   let init = null;
-  if (v.key) {
+  if (v.key || v.mid) {
     try {
-      init = await initVideoSession(cookies, v.objectId, v.key, v.fid);
+      init = await initVideoSession(cookies, {
+        objectId: v.objectId,
+        mid: v.mid || "",
+        cpi: v.cpi || course.cpi,
+        clazzId: course.clazzId,
+        courseId: course.courseId,
+        key: v.key || "",
+        fid: v.fid,
+      });
     } catch (e) {
       init = { status: 0, ok: false, body: String(e), url: "" };
     }

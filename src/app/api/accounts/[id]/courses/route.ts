@@ -16,11 +16,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return Response.json({ ok: false, message: "账号不存在" }, { status: 404 });
   }
   const courses = await listCourses(ctx.db, account.id);
-  return Response.json({
-    ok: true,
-    loginStatus: account.login_status,
-    courses: courses.map(serializeCourse),
-  });
+  return Response.json(
+    {
+      ok: true,
+      loginStatus: account.login_status,
+      courses: courses.map(serializeCourse),
+    },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } },
+  );
 }
 
 // 实时拉取超星课程并入库

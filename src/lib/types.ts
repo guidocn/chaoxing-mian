@@ -148,6 +148,13 @@ export interface TaskDTO {
   errorMessage: string;
   startedAt: number | null;
   updatedAt: number;
+  // 每门课的独立进度（引擎写入 state）
+  courseProgress: Array<{
+    courseId: string;
+    title: string;
+    total: number;
+    done: number;
+  }>;
 }
 
 export interface CourseDTO {

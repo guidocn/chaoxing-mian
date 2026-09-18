@@ -63,6 +63,8 @@ export interface EngineState {
   fid: string;
   attDurationEnc: string;
   userid: string;
+  // 每门课的独立进度
+  courseProgress: Array<{ courseId: string; title: string; total: number; done: number }>;
   // 缓存
   courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string; teacher: string }>;
   chapters: CourseChapter[];
@@ -86,6 +88,7 @@ const initialState: EngineState = {
   fid: "",
   attDurationEnc: "",
   userid: "",
+  courseProgress: [],
   courses: [],
   chapters: [],
   retry403: 0,
@@ -184,6 +187,15 @@ export async function runTick(
           await save({ status: "done", phase: "完成" }, state);
           return { done: true, status: "done", state, progress: { total: 0, finished: 0 } };
         }
+        // 初始化每门课进度（total/done 在处理过程中动态累计）
+        if (state.courseProgress.length !== state.courses.length) {
+          state.courseProgress = state.courses.map((c) => ({
+            courseId: c.courseId,
+            title: c.title || "超星课程",
+            total: 0,
+            done: 0,
+          }));
+        }
         state.phase = "chapters";
         state.chapterIndex = 0;
         await log("success", `共获取 ${state.courses.length} 门课程，开始刷课`);
@@ -240,6 +252,7 @@ export async function runTick(
         if (videos.length > 0) {
           const v = videos[0];
           state.taskIndex = 0;
+          bumpCourse(state, course.courseId, "total");
           state.objectId = v.objectId;
           state.jobid = v.jobid;
           state.otherInfo = v.otherInfo || chapter.knowledgeId;
@@ -265,6 +278,7 @@ export async function runTick(
           state.jobid = docMatch[1];
           state.otherInfo = chapter.knowledgeId;
           state.phase = "document";
+          bumpCourse(state, course.courseId, "total");
           await save({ current_chapter: chapter.title, phase: "文档阅读" }, state);
           return { done: false, status: "running", state, progress: progressOf(state) };
         }
@@ -316,6 +330,7 @@ export async function runTick(
 
         if (res.finished) {
           await log("success", `视频完成：${chapter.title}`);
+          bumpCourse(state, course.courseId, "done");
           state.chapterIndex += 1;
           state.phase = "card";
         } else {
@@ -343,6 +358,7 @@ export async function runTick(
           objectId: state.objectId || "",
         });
         await log("success", `文档已完成：${chapter.title}`);
+        bumpCourse(state, course.courseId, "done");
         state.chapterIndex += 1;
         state.phase = "card";
         await save({}, state);
@@ -434,6 +450,19 @@ async function handleForbidden(
   await log("error", `执行异常：${msg}`);
   await save({ status: "error", error_message: msg }, state);
   return { done: false, status: "error", state, progress: progressOf(state) };
+}
+
+// 每门课进度累计
+function bumpCourse(
+  state: EngineState,
+  courseId: string,
+  field: "total" | "done",
+  delta = 1,
+): void {
+  const cp = state.courseProgress.find((c) => c.courseId === courseId);
+  if (!cp) return;
+  cp[field] += delta;
+  if (cp.done > cp.total) cp.done = cp.total;
 }
 
 function progressOf(state: EngineState): { total: number; finished: number } {

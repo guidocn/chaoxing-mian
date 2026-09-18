@@ -165,10 +165,6 @@ export default function AccountDetailPage() {
 
   const st = STATUS_LABEL[task?.status ?? "idle"] ?? STATUS_LABEL.idle;
   const running = task?.status === "running";
-  const progress =
-    task && task.totalPoints > 0
-      ? Math.round(((task.donePoints + task.failedPoints) / task.totalPoints) * 100)
-      : 0;
 
   return (
     <div>
@@ -256,19 +252,48 @@ export default function AccountDetailPage() {
                 </span>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-600">总进度</span>
-                  <span className="text-slate-800 font-medium">
-                    {task ? `${task.donePoints + task.failedPoints}/${task.totalPoints}` : "0/0"} 任务点
-                    {task && task.totalPoints > 0 ? ` · ${progress}%` : ""}
-                  </span>
+              <div className="space-y-4">
+                {/* 每门课单独进度条 */}
+                <div>
+                  <div className="text-sm font-medium text-slate-600 mb-2">课程进度（实时）</div>
+                  {!task?.courseProgress || task.courseProgress.length === 0 ? (
+                    <div className="text-sm text-slate-400 py-2">暂无课程进度，开始任务后自动统计</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {task.courseProgress.map((p) => {
+                        const pct = p.total > 0 ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
+                        const isCurrent =
+                          task.currentCourse && p.title === task.currentCourse;
+                        return (
+                          <div key={p.courseId}>
+                            <div className="flex items-center justify-between text-sm mb-1 gap-2">
+                              <span
+                                className={
+                                  "truncate " +
+                                  (isCurrent ? "text-blue-700 font-medium" : "text-slate-700")
+                                }
+                              >
+                                {isCurrent && (
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 mr-1.5 align-middle animate-pulse" />
+                                )}
+                                {p.title || "超星课程"}
+                              </span>
+                              <span className="text-slate-500 font-mono text-xs shrink-0">
+                                {p.done}/{p.total} · {pct}%
+                              </span>
+                            </div>
+                            <Progress value={pct} className="h-1.5" />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                <Progress value={progress} className="h-2" />
-                <div className="flex gap-4 text-xs text-slate-500 pt-1">
+                <div className="flex gap-4 text-xs text-slate-500 pt-1 border-t border-slate-100">
                   <span className="text-green-600">完成 {task?.donePoints ?? 0}</span>
                   <span className="text-red-500">失败 {task?.failedPoints ?? 0}</span>
                   <span>跳过 {task?.skippedPoints ?? 0}</span>
+                  <span className="ml-auto">任务点 {task ? `${task.donePoints + task.failedPoints}/${task.totalPoints}` : "0/0"}</span>
                 </div>
               </div>
             </CardContent>
@@ -350,7 +375,15 @@ export default function AccountDetailPage() {
           {/* 实时日志 */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">运行日志</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2">
+                运行日志
+                {running && (
+                  <span className="inline-flex items-center gap-1 text-xs text-blue-600 font-normal">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    实时
+                  </span>
+                )}
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div

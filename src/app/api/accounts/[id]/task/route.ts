@@ -25,12 +25,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const total = await countCoursesByAccount(ctx.db, account.id);
   const selected = await countCoursesByAccount(ctx.db, account.id, 1);
   const logs = task ? await listRecentLogs(ctx.db, task.id) : [];
-  return Response.json({
-    ok: true,
-    account: serializeAccount(account, task, total, selected),
-    task: serializeTask(task),
-    logs: logs.map(serializeLog),
-  });
+  const headers = { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" };
+  return Response.json(
+    {
+      ok: true,
+      account: serializeAccount(account, task, total, selected),
+      task: serializeTask(task),
+      logs: logs.map(serializeLog),
+    },
+    { headers },
+  );
 }
 
 // 创建任务（如需新参数）

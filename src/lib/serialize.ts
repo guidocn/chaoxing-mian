@@ -30,6 +30,10 @@ function fmtTime(sec: number | null): string {
 export function serializeTask(t: TaskRow | null): TaskDTO | null {
   if (!t) return null;
   const stats = safeParse<TaskStats>(t.stats, {});
+  const state = safeParse<{ courseProgress?: Array<{ courseId: string; title: string; total: number; done: number }> }>(
+    t.state,
+    {},
+  );
   return {
     id: t.id,
     accountId: t.account_id,
@@ -50,6 +54,7 @@ export function serializeTask(t: TaskRow | null): TaskDTO | null {
     errorMessage: t.error_message,
     startedAt: t.started_at,
     updatedAt: t.updated_at,
+    courseProgress: state.courseProgress ?? [],
   };
 }
 

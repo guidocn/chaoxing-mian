@@ -68,6 +68,8 @@ export interface EngineState {
   courseProgress: Array<{ courseId: string; title: string; total: number; done: number }>;
   // 视频完成未确认重试计数
   retryDone: number;
+  // 上次视频上报时间戳（真实速率节流）
+  lastReportTs: number;
   // 缓存
   courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string; teacher: string }>;
   chapters: CourseChapter[];
@@ -95,6 +97,7 @@ const initialState: EngineState = {
   courses: [],
   chapters: [],
   retryDone: 0,
+  lastReportTs: 0,
   retry403: 0,
 };
 
@@ -281,7 +284,7 @@ export async function runTick(
           state.reportUrl = v.reportUrl || "";
           state.playingTime = 0;
           state.phase = "video";
-          await log("info", `视频任务：${chapter.title}（时长 ${state.duration}s，${task.speed}x）`);
+          await log("info", `视频任务：${chapter.title}（时长 ${state.duration}s，1x 真实速率）`);
           await save({ current_chapter: chapter.title, phase: "视频学习" }, state);
           return { done: false, status: "running", state, progress: progressOf(state) };
         }
@@ -315,12 +318,27 @@ export async function runTick(
       }
     }
 
-    // ---------- 视频心跳：每次 tick 推进 step 秒 ----------
+    // ---------- 视频心跳：按真实时间×倍速推进（模拟播放器，防超星反作弊） ----------
     case "video": {
       if (!course || !chapter) return advanceCourse(state, save, log);
       try {
-        // 倍速下每个 tick 推进较多；步长控制在 30~120s，避免异常
-        const step = Math.min(Math.round(55 * Number(task.speed || 2)), 120);
+        // 固定 1x 真实速率：每次推进量 = 实际经过时间，防止被超星判定异常观看不累计
+        const speed = 1;
+        const now = Date.now();
+        const prevTs = state.lastReportTs;
+        // 上报节流：距上次上报不足 25 秒则等待（播放器 reportTimeInterval=60s，我们取 25s 粒度）
+        const elapsed = prevTs ? (now - prevTs) / 1000 : 0;
+        if (prevTs && elapsed < 25) {
+          await log(
+            "info",
+            `视频播放中：${chapter.title}（${Math.ceil(25 - elapsed)}s 后上报）`,
+          );
+          return { done: false, status: "running", state, progress: progressOf(state) };
+        }
+        state.lastReportTs = now;
+        // 本次推进量 = 实际经过时间（首次按 30s 起步，1x）
+        const inc = prevTs ? Math.max(1, Math.round(elapsed)) : 30;
+        const step = Math.max(1, Math.min(inc, 600));
         const res = await reportVideoHeartbeat(cookies, {
           clazzId: course.clazzId,
           courseId: course.courseId,
@@ -329,7 +347,7 @@ export async function runTick(
           otherInfo: state.otherInfo,
           jobid: state.jobid,
           duration: state.duration || step * 2,
-          speed: Number(task.speed || 2),
+          speed,
           step,
           playingTime: state.playingTime,
           enc: state.enc,
@@ -348,6 +366,7 @@ export async function runTick(
             await log("success", `视频完成：${chapter.title}`);
             bumpCourse(state, course.courseId, "done");
             state.retryDone = 0;
+            state.lastReportTs = 0;
             state.chapterIndex += 1;
             state.phase = "card";
           } else {
@@ -356,6 +375,7 @@ export async function runTick(
               await log("warn", `视频多次上报未获超星确认，跳过：${chapter.title}`);
               bumpCourse(state, course.courseId, "done");
               state.retryDone = 0;
+              state.lastReportTs = 0;
               state.chapterIndex += 1;
               state.phase = "card";
             } else {

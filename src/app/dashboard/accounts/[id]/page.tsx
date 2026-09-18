@@ -348,15 +348,13 @@ export default function AccountDetailPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>视频倍速（1-16）</Label>
+                <Label>视频倍速（固定 1x，真实速率，防止被超星判定异常）</Label>
                 <Input
                   type="number"
-                  step="0.5"
-                  min="1"
-                  max="16"
-                  defaultValue={account.speed}
-                  onChange={(e) => setSpeed(e.target.value)}
-                  onBlur={updateSettings}
+                  value={1}
+                  readOnly
+                  disabled
+                  className="opacity-60"
                 />
               </div>
               <div className="flex items-center justify-between">

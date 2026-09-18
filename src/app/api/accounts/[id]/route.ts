@@ -43,8 +43,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const task = await getTaskByAccount(ctx.db, accountId);
   if (task) {
     const patch: Record<string, unknown> = {};
-    if (typeof body.speed === "number" && body.speed >= 1 && body.speed <= 16) {
-      patch.speed = body.speed;
+    // 倍速固定 1x（真实速率观看，防超星反作弊判定异常不累计）
+    if (typeof body.speed === "number") {
+      patch.speed = 1;
     }
     if (typeof body.autoSubmit !== "undefined") {
       patch.auto_submit = body.autoSubmit ? 1 : 0;

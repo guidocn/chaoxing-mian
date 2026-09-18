@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const taskId = await createTask(ctx.db, {
     accountId: account.id,
     userId: ctx.user.id,
-    speed: clampSpeed(body.speed ?? 2),
+    speed: 1, // 固定 1x：真实速率观看，防止被超星判定异常观看不累计
     autoSubmit: body.autoSubmit === false ? 0 : 1,
     tikuProvider: body.tikuProvider ?? "none",
     tikuApi: body.tikuApi ?? "",
@@ -75,6 +75,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 function clampSpeed(n: number): number {
-  if (!Number.isFinite(n)) return 2;
+  if (!Number.isFinite(n)) return 1;
   return Math.min(16, Math.max(1, n));
 }

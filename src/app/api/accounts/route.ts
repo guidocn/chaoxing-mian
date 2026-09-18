@@ -65,12 +65,12 @@ export async function POST(req: NextRequest) {
   const enc = appEncrypt(password, ctx.secret);
   const id = await createCxAccount(ctx.db, { userId: ctx.user.id, label, phone, passwordEnc: enc });
 
-  // 立即创建对应任务配置（speed / autoSubmit / 题库）
+  // 立即创建对应任务配置（speed 固定 1x / autoSubmit / 题库）
   const { createTask } = await import("@/lib/db/repo");
   await createTask(ctx.db, {
     accountId: id,
     userId: ctx.user.id,
-    speed: typeof body.speed === "number" ? body.speed : 2,
+    speed: 1, // 固定 1x：真实速率观看，防止被超星判定异常观看不累计
     autoSubmit: body.autoSubmit === false ? 0 : 1,
     tikuProvider: "none",
     tikuApi: "",

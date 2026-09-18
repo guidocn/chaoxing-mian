@@ -1,0 +1,207 @@
+import { getCxAccount, getTaskByAccount } from "@/lib/db/repo";
+import { requireUser } from "@/lib/server";
+import { fetchVideoConfig, initVideoSession, reportVideoHeartbeat, parseVideoTasks } from "@/lib/chaoxing/video";
+import { fetchChapters, fetchStudyCard } from "@/lib/chaoxing/api";
+import type { CookieJar } from "@/lib/chaoxing/client";
+
+export const runtime = "edge";
+
+function safeJson<T>(text: string, fallback: T): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+interface EngineStateLite {
+  courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string }>;
+}
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * 完整视频协议验证器（临时诊断接口，验证后应删）：
+ * GET /api/diag/verify?course=0&fast=1&variant=0&maxScan=30
+ *   course  课程索引（state.courses 内）
+ *   fast    1=快速模拟（间隔 1s，步进 25s）；0=真实节奏（间隔 25s，很慢）
+ *   variant 心跳参数变体：0 baseline / 1 dtype小写 / 2 clipTime毫秒 / 3 去view=pc / 4 POST / 6 加mtEnc
+ *   maxScan 最多扫描章节数（找第一个真视频）
+ * 流程：拉章节→拉卡片→解析视频任务→status 取真 duration→完整心跳直到播满→返回每轮结果与最终 isPassed。
+ */
+export async function GET(request: Request) {
+  const ctx = await requireUser();
+  if ("error" in ctx) return Response.json({ ok: false, message: ctx.error }, { status: ctx.status });
+
+  const account = await getCxAccount(ctx.db, 1);
+  if (!account) return Response.json({ ok: false, message: "acc1 不存在" });
+  const task = await getTaskByAccount(ctx.db, account.id);
+  if (!task) return Response.json({ ok: false, message: "acc1 无任务" });
+
+  const state = safeJson<EngineStateLite>(task.state || "{}", {} as EngineStateLite);
+  const courses = state.courses || [];
+  if (courses.length === 0)
+    return Response.json({ ok: false, message: "state 无课程（先重置并开始一次任务）" });
+
+  const u = new URL(request.url);
+  const courseIdx = Math.min(Number(u.searchParams.get("course") ?? "0"), courses.length - 1);
+  const fast = u.searchParams.get("fast") !== "0";
+  const variant = Number(u.searchParams.get("variant") ?? "0");
+  const maxScan = Number(u.searchParams.get("maxScan") ?? "30");
+  const course = courses[courseIdx];
+  const cookies: CookieJar = safeJson<CookieJar>(account.cookies, {});
+
+  // 1. 拉章节
+  let chapters: Array<{ knowledgeId: string; title: string }> = [];
+  try {
+    chapters = await fetchChapters(cookies, {
+      clazzId: course.clazzId,
+      courseId: course.courseId,
+      cpi: course.cpi,
+    });
+  } catch (e) {
+    return Response.json({ ok: false, message: `拉章节失败: ${e instanceof Error ? e.message : e}` });
+  }
+  const scan = chapters.slice(0, maxScan);
+
+  // 2. 逐章扫卡片，找真视频
+  const found: Array<{
+    chapterTitle: string;
+    knowledgeId: string;
+    objectId: string;
+    jobid: string;
+    otherInfo: string;
+    reportUrl: string;
+    fid: string;
+    attDurationEnc: string;
+    userid: string;
+    duration: number;
+    dtoken: string;
+    key?: string;
+    cardStatus: number;
+  }> = [];
+  for (const ch of scan) {
+    const card = await fetchStudyCard(cookies, {
+      clazzId: course.clazzId,
+      courseId: course.courseId,
+      cpi: course.cpi,
+      chapterId: ch.knowledgeId,
+    });
+    if (card.status !== 200) continue;
+    const videos = parseVideoTasks(card.html);
+    for (const v of videos) {
+      const cfg = await fetchVideoConfig(cookies, v.objectId, v.fid || account.fid || undefined);
+      if (cfg.duration && cfg.duration >= 10 && cfg.duration <= 900) {
+        found.push({
+          chapterTitle: ch.title,
+          knowledgeId: ch.knowledgeId,
+          objectId: v.objectId,
+          jobid: v.jobid,
+          otherInfo: v.otherInfo || ch.knowledgeId,
+          reportUrl: v.reportUrl,
+          fid: v.fid || account.fid || "1888",
+          attDurationEnc: v.attDurationEnc || "",
+          userid: v.userid || account.uid || "",
+          duration: cfg.duration,
+          dtoken: cfg.dtoken || "",
+          key: cfg.key,
+          cardStatus: card.status,
+        });
+        break;
+      }
+    }
+    if (found.length > 0) break;
+  }
+  if (found.length === 0)
+    return Response.json({
+      ok: false,
+      message: `前 ${maxScan} 章未找到真视频（10-900s）`,
+      scanned: scan.length,
+      chapters_total: chapters.length,
+    });
+
+  const v = found[0];
+
+  // 3. 初始化观看会话
+  let init = null;
+  if (v.key) {
+    try {
+      init = await initVideoSession(cookies, v.objectId, v.key, v.fid);
+    } catch (e) {
+      init = { status: 0, ok: false, body: String(e), url: "" };
+    }
+  }
+
+  // 4. 完整心跳直到播满
+  const rounds: Array<{ t: number; playingTime: number; passed: boolean; raw: string }> = [];
+  let playing = 0;
+  let finished = false;
+  let guard = 0;
+  while (guard < 60) {
+    guard += 1;
+    if (fast) await sleep(1000);
+    else await sleep(25000);
+    const res = await reportVideoHeartbeat(cookies, {
+      clazzId: course.clazzId,
+      courseId: course.courseId,
+      knowledgeId: v.knowledgeId,
+      objectId: v.objectId,
+      otherInfo: v.otherInfo,
+      jobid: v.jobid,
+      duration: v.duration,
+      speed: 1,
+      step: 25,
+      playingTime: playing,
+      reportUrl: v.reportUrl,
+      rt: "1",
+      dtoken: v.dtoken,
+      fid: v.fid,
+      attDurationEnc: v.attDurationEnc,
+      userid: v.userid,
+      cpi: course.cpi,
+      variant,
+    });
+    playing = res.newPlayingTime;
+    rounds.push({
+      t: rounds.length + 1,
+      playingTime: playing,
+      passed: res.passed,
+      raw: res.raw.slice(0, 180),
+    });
+    if (res.passed || res.finished) {
+      finished = res.finished;
+      break;
+    }
+    if (playing >= v.duration) break;
+  }
+
+  return Response.json({
+    ok: true,
+    course: course.title,
+    video: {
+      chapter: v.chapterTitle,
+      object_id: v.objectId,
+      jobid: v.jobid,
+      duration: v.duration,
+      dtoken_from_status: !!v.dtoken,
+      key_from_status: !!v.key,
+      fid: v.fid,
+      userid: v.userid,
+      att_duration_enc: v.attDurationEnc,
+      report_url: v.reportUrl,
+      card_status: v.cardStatus,
+    },
+    init_session: init ? { status: init.status, ok: init.ok, body: init.body?.slice(0, 120) } : "no-key",
+    variant,
+    fast,
+    rounds,
+    final: {
+      passed: rounds.some((r) => r.passed),
+      finished,
+      last_playing_time: playing,
+    },
+    note: "isPassed=true 表示协议被超星确认；false 表示上报被接受但未达完成判定，需换 variant 再测",
+  });
+}

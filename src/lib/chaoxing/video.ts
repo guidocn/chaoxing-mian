@@ -30,6 +30,9 @@ export interface VideoTaskParams {
   attDurationEnc?: string;
   // 附加字段（卡片 defaults 里的 userid/rt 等）
   userid?: string;
+  // 参数变体（diag/verify 协议对照实验用）：
+  // 0=baseline, 1=dtype 小写, 2=clipTime 毫秒, 3=去掉 view=pc, 4=POST, 6=加 mtEnc
+  variant?: number;
 }
 
 export interface VideoReportResult {
@@ -116,8 +119,11 @@ export async function reportVideoHeartbeat(
       ? p.reportUrl.replace(/\/+$/, "")
       : `https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/${cpi}`;
 
-  // clipTime：秒级时间区间，形如 0_30
-  const clipStr = `${clipStart}_${clipEnd}`;
+  // clipTime：秒级时间区间，形如 0_30；variant=2 时用毫秒
+  const clipStr =
+    p.variant === 2
+      ? `${clipStart * 1000}_${clipEnd * 1000}`
+      : `${clipStart}_${clipEnd}`;
   const playMs = clipEnd * 1000;
   const durMs = Math.max(1, p.duration) * 1000;
   const signStr = `[${p.clazzId}][${userid}][${p.jobid}][${p.objectId}][${playMs}][d_yHJ!$pdA~5][${durMs}][${clipStr}]`;
@@ -139,28 +145,54 @@ export async function reportVideoHeartbeat(
     `enc=${enc}`,
     `rt=${p.rt || "1"}`,
     `videoFaceCaptureEnc=`,
-    `dtype=Video`,
+    `dtype=${p.variant === 1 ? "video" : "Video"}`,
     `_t=${Date.now()}`,
     `attDuration=${p.duration}`,
     `attDurationEnc=${p.attDurationEnc || ""}`,
     `courseEngineInfo=false`,
   ];
-  const url = `${reportBase}/${p.dtoken || ""}?${parts.join("&")}`;
+  // variant=3：去掉 view=pc；variant=6：附加 mtEnc=
+  const finalParts =
+    p.variant === 3 ? parts.filter((x) => !x.startsWith("view=")) : parts.slice();
+  if (p.variant === 6) finalParts.push(`mtEnc=`);
+  const url = `${reportBase}/${p.dtoken || ""}?${finalParts.join("&")}`;
 
-  const resp = await client.get(url, {
-    headers: {
-      Accept: "application/json, text/javascript, */*; q=0.01",
-      "X-Requested-With": "XMLHttpRequest",
-      Origin: "https://mooc1.chaoxing.com",
-      Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
-      "Sec-Fetch-Site": "same-origin",
-      "Sec-Fetch-Mode": "cors",
-      "Sec-Fetch-Dest": "empty",
-    },
-    timeout: 20000,
-  });
+  const doSend = async (): Promise<{ status: number; text: string }> => {
+    if (p.variant === 4) {
+      // POST 变体：参数放 body，form 编码
+      const form: Record<string, string> = {};
+      for (const kv of finalParts) {
+        const i = kv.indexOf("=");
+        if (i > 0) form[kv.slice(0, i)] = kv.slice(i + 1);
+      }
+      const r = await client.post(`${reportBase}/${p.dtoken || ""}`, {
+        form,
+        headers: {
+          Accept: "application/json, text/javascript, */*; q=0.01",
+          "X-Requested-With": "XMLHttpRequest",
+          Origin: "https://mooc1.chaoxing.com",
+          Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
+        },
+        timeout: 20000,
+      });
+      return { status: r.status, text: r.text ?? "" };
+    }
+    const resp = await client.get(url, {
+      headers: {
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+        Origin: "https://mooc1.chaoxing.com",
+        Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+      },
+      timeout: 20000,
+    });
+    return { status: resp.status, text: resp.text ?? "" };
+  };
 
-  const text = resp.text ?? "";
+  const { status, text } = await doSend();
   let passed = false;
   try {
     // 响应形如 var d={...isPassed...} 或 {isPassed:...}
@@ -176,7 +208,7 @@ export async function reportVideoHeartbeat(
     passed,
     newPlayingTime: targetPlaying,
     finished: targetPlaying >= p.duration,
-    raw: text.slice(0, 300),
+    raw: `HTTP ${status} ${text.slice(0, 200)}`,
   };
 }
 

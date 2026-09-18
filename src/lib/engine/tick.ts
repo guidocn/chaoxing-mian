@@ -222,6 +222,11 @@ export async function runTick(
           courseId: course.courseId,
           cpi: course.cpi,
         });
+        // 0 章节课程：可能是已失效/无权限课程，跳过避免死循环
+        if (chapters.length === 0) {
+          await log("warn", `《${course.title || "超星课程"}》章节为空，跳过该课程`);
+          return advanceCourse(state, save, log);
+        }
         state.chapters = chapters;
         state.chapterIndex = 0;
         await log("info", `《${course.title}》共 ${chapters.length} 个章节`);
@@ -255,6 +260,23 @@ export async function runTick(
         });
         if (card.status === 403) throw new ForbiddenError("章节卡片 403");
 
+        // ---------- 任务类型识别 ----------
+        // 1) 文档/PDF/阅读任务（优先）：新版卡片用 dtype/property.module 标记，
+        //    objectId 正则会撞上 PDF 的 objectId，必须先识别文档任务
+        const docTaskRe =
+          /dtype["']\s*:\s*["'](?:document|pdf|doc|readbook)["']|property\.module["']?\s*:\s*["']insertpdf|readbook|\.pdf["']|知识文档|阅读任务/i;
+        if (docTaskRe.test(card.html)) {
+          const objM = /objectId["':=\s]+["']?([0-9a-f]{20,})/i.exec(card.html);
+          const jobM = /jobid["':=\s]+["']?([0-9a-f-]{20,})/i.exec(card.html);
+          state.jobid = jobM?.[1] ?? objM?.[1] ?? "";
+          state.objectId = objM?.[1] ?? "";
+          state.otherInfo = chapter.knowledgeId;
+          state.phase = "document";
+          bumpCourse(state, course.courseId, "total");
+          await save({ current_chapter: chapter.title, phase: "文档阅读" }, state);
+          return { done: false, status: "running", state, progress: progressOf(state) };
+        }
+
         const videos = parseVideoTasks(card.html);
         if (videos.length > 0) {
           const v = videos[0];
@@ -268,7 +290,25 @@ export async function runTick(
           state.fid = v.fid || "";
           state.attDurationEnc = v.attDurationEnc || "";
           state.userid = v.userid || "";
-          const cfg = await fetchVideoConfig(cookies, v.objectId, v.fid);
+          let cfg = await fetchVideoConfig(cookies, v.objectId, v.fid);
+          // 无时长且无 dtoken：可能是文档任务被误判为视频（PDF/阅读任务）。
+          // status 偶发失败会同时丢 duration 与 dtoken，重试一次再判定。
+          if ((!cfg.duration && !cfg.dtoken) || (cfg.duration === 0 && !cfg.dtoken)) {
+            cfg = await fetchVideoConfig(cookies, v.objectId, v.fid);
+          }
+          if (!cfg.duration && !cfg.dtoken) {
+            // 文档任务：转 document 流程标记完成（不能跳过漏任务点）
+            state.jobid = state.jobid || v.jobid || v.objectId;
+            state.objectId = v.objectId;
+            state.otherInfo = chapter.knowledgeId;
+            state.phase = "document";
+            bumpCourse(state, course.courseId, "done");
+            await log("warn", `文档任务（非视频），按文档标记完成：${chapter.title}`);
+            state.chapterIndex += 1;
+            state.phase = "card";
+            await save({ current_chapter: chapter.title, phase: "文档完成" }, state);
+            return { done: false, status: "running", state, progress: progressOf(state) };
+          }
           state.duration = cfg.duration || Number(v.duration) || 0;
           state.dtoken = cfg.dtoken || "";
           // 初始化观看会话（status 之后播放器会调 richvideo/initdatawithviewer）
@@ -322,6 +362,16 @@ export async function runTick(
     case "video": {
       if (!course || !chapter) return advanceCourse(state, save, log);
       try {
+        // 兜底：异常进入 video 但无时长/无会话 → 按文档标记完成，避免"假完成"空耗
+        if (!state.duration && !state.dtoken) {
+          state.phase = "document";
+          bumpCourse(state, course.courseId, "done");
+          await log("warn", `视频无时长/无会话，按文档标记完成：${chapter.title}`);
+          state.chapterIndex += 1;
+          state.phase = "card";
+          await save({}, state);
+          return { done: false, status: "running", state, progress: progressOf(state) };
+        }
         // 固定 1x 真实速率：每次推进量 = 实际经过时间，防止被超星判定异常观看不累计
         const speed = 1;
         const now = Date.now();

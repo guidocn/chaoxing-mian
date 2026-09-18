@@ -91,11 +91,12 @@ function clipTime(t: number): number {
 }
 
 /**
- * 新版视频心跳上报：
+ * 新版视频心跳上报（严格复刻播放器 videojs-ext 格式）：
  * GET {reportUrl}/{dtoken}?clazzId=...&playingTime=...&duration=...&clipTime=...&objectId=...
- *   &otherInfo=...&jobid=...&userid=...&isdrag=0&view=pc&enc=md5(...)&rt=...&dtype=Video
- *   &_t=...&attDuration=...&attDurationEnc=...&courseEngineInfo=false
+ *   &otherInfo=<原始串，不编码>&jobid=...&userid=...&isdrag=0&view=pc&enc=md5(...)&rt=...
+ *   &videoFaceCaptureEnc=&dtype=Video&_t=...&attDuration=...&attDurationEnc=...&courseEngineInfo=false
  * 签名：md5("[clazzId][userid][jobid][objectId][playingMs][d_yHJ!$pdA~5][durationMs][clipTime]")
+ * 注意：参数顺序必须与播放器一致；otherInfo 含 & 字符时必须原样拼接（服务端按播放器逻辑解析）。
  */
 export async function reportVideoHeartbeat(
   cookies: CookieJar,
@@ -106,7 +107,6 @@ export async function reportVideoHeartbeat(
   const clipStart = clipTime(p.playingTime);
   const clipEnd = clipTime(targetPlaying);
   const userid = p.userid || client.getCookie("_uid") || client.getCookie("UID") || "";
-  const fid = p.fid || client.getCookie("fid") || "";
   const reportBase =
     p.reportUrl && p.reportUrl !== "https://mooc1.chaoxing.com/multimedia/log"
       ? p.reportUrl.replace(/\/+$/, "")
@@ -119,32 +119,39 @@ export async function reportVideoHeartbeat(
   const signStr = `[${p.clazzId}][${userid}][${p.jobid}][${p.objectId}][${playMs}][d_yHJ!$pdA~5][${durMs}][${clipStr}]`;
   const enc = md5(signStr);
 
-  const params = new URLSearchParams({
-    clazzId: p.clazzId,
-    playingTime: String(clipEnd),
-    duration: String(p.duration),
-    clipTime: clipStr,
-    objectId: p.objectId,
-    otherInfo: p.otherInfo || p.knowledgeId,
-    jobid: p.jobid,
-    userid,
-    isdrag: "0",
-    view: "pc",
-    enc,
-    rt: p.rt || "1",
-    videoFaceCaptureEnc: "",
-    dtype: "Video",
-    attDuration: String(p.duration),
-    attDurationEnc: p.attDurationEnc || "",
-    courseEngineInfo: "false",
-  });
-  params.set("_t", String(Date.now()));
+  // 严格按播放器顺序手写拼接；otherInfo 原始串直接拼（不 URL 编码）
+  const otherInfoRaw = p.otherInfo || p.knowledgeId;
+  const parts = [
+    `clazzId=${p.clazzId}`,
+    `playingTime=${clipEnd}`,
+    `duration=${p.duration}`,
+    `clipTime=${clipStr}`,
+    `objectId=${p.objectId}`,
+    `otherInfo=${otherInfoRaw}`,
+    `jobid=${p.jobid}`,
+    `userid=${userid}`,
+    `isdrag=0`,
+    `view=pc`,
+    `enc=${enc}`,
+    `rt=${p.rt || "1"}`,
+    `videoFaceCaptureEnc=`,
+    `dtype=Video`,
+    `_t=${Date.now()}`,
+    `attDuration=${p.duration}`,
+    `attDurationEnc=${p.attDurationEnc || ""}`,
+    `courseEngineInfo=false`,
+  ];
+  const url = `${reportBase}/${p.dtoken || ""}?${parts.join("&")}`;
 
-  const url = `${reportBase}/${p.dtoken || ""}?${params.toString()}`;
   const resp = await client.get(url, {
     headers: {
+      Accept: "application/json, text/javascript, */*; q=0.01",
       "X-Requested-With": "XMLHttpRequest",
+      Origin: "https://mooc1.chaoxing.com",
       Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
     },
     timeout: 20000,
   });

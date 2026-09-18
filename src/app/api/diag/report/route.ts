@@ -79,6 +79,17 @@ export async function GET() {
       object_id: objectId,
       course: course.title,
       duration: state.duration,
+      state: {
+        jobid: state.jobid,
+        other_info: state.otherInfo,
+        rt: state.rt,
+        fid: state.fid || account.fid,
+        att_duration_enc: state.attDurationEnc,
+        report_url: state.reportUrl,
+        clazz_id: course.clazzId,
+        course_id: course.courseId,
+        userid: state.userid || account.uid,
+      },
       status_config: { dtoken_from_status: !!cfg.dtoken, duration_from_status: cfg.duration },
       report: {
         passed: res.passed,

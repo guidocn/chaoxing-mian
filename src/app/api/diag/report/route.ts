@@ -72,6 +72,7 @@ export async function GET() {
       fid: state.fid || account.fid || undefined,
       attDurationEnc: state.attDurationEnc,
       userid: state.userid || account.uid || undefined,
+      cpi: course.cpi,
     });
 
     return Response.json({

@@ -65,6 +65,8 @@ export interface EngineState {
   userid: string;
   // 每门课的独立进度
   courseProgress: Array<{ courseId: string; title: string; total: number; done: number }>;
+  // 视频完成未确认重试计数
+  retryDone: number;
   // 缓存
   courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string; teacher: string }>;
   chapters: CourseChapter[];
@@ -91,6 +93,7 @@ const initialState: EngineState = {
   courseProgress: [],
   courses: [],
   chapters: [],
+  retryDone: 0,
   retry403: 0,
 };
 
@@ -325,14 +328,31 @@ export async function runTick(
           fid: state.fid,
           attDurationEnc: state.attDurationEnc,
           userid: state.userid,
+          cpi: course.cpi,
         });
         state.playingTime = res.newPlayingTime;
 
         if (res.finished) {
-          await log("success", `视频完成：${chapter.title}`);
-          bumpCourse(state, course.courseId, "done");
-          state.chapterIndex += 1;
-          state.phase = "card";
+          if (res.passed) {
+            await log("success", `视频完成：${chapter.title}`);
+            bumpCourse(state, course.courseId, "done");
+            state.retryDone = 0;
+            state.chapterIndex += 1;
+            state.phase = "card";
+          } else {
+            state.retryDone += 1;
+            if (state.retryDone >= 3) {
+              await log("warn", `视频多次上报未获超星确认，跳过：${chapter.title}`);
+              bumpCourse(state, course.courseId, "done");
+              state.retryDone = 0;
+              state.chapterIndex += 1;
+              state.phase = "card";
+            } else {
+              // 回退 30 秒补报一轮，等待超星确认
+              state.playingTime = Math.max(0, state.duration - 30);
+              await log("warn", `超星未确认通过（${state.retryDone}/3），补报中：${chapter.title}`);
+            }
+          }
         } else {
           const pct = state.duration
             ? Math.round((state.playingTime / state.duration) * 100)

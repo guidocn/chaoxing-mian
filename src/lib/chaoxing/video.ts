@@ -24,6 +24,8 @@ export interface VideoTaskParams {
   dtoken: string;
   // 学校 fid（status 接口 k 参数；cookie 中为 fid=1888）
   fid?: string;
+  // 课程 cpi（上报 URL 路径 /multimedia/log/a/{cpi}；reportUrl 为空时的正确 fallback）
+  cpi?: string;
   // 附件 duration 加密串（attachments.attDurationEnc）
   attDurationEnc?: string;
   // 附加字段（卡片 defaults 里的 userid/rt 等）
@@ -107,10 +109,12 @@ export async function reportVideoHeartbeat(
   const clipStart = clipTime(p.playingTime);
   const clipEnd = clipTime(targetPlaying);
   const userid = p.userid || client.getCookie("_uid") || client.getCookie("UID") || "";
+  // reportUrl 优先用卡片 defaults；否则用课程真实 cpi（绝不能 fallback 到 0，否则超星不记录学习时间）
+  const cpi = p.cpi || "";
   const reportBase =
     p.reportUrl && p.reportUrl !== "https://mooc1.chaoxing.com/multimedia/log"
       ? p.reportUrl.replace(/\/+$/, "")
-      : `https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/${p.clazzId ? "0" : "0"}`;
+      : `https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/${cpi}`;
 
   // clipTime：秒级时间区间，形如 0_30
   const clipStr = `${clipStart}_${clipEnd}`;

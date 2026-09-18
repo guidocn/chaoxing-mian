@@ -49,7 +49,7 @@ export async function GET(request: Request) {
   const courseIdx = Math.min(Number(u.searchParams.get("course") ?? "0"), courses.length - 1);
   const fast = u.searchParams.get("fast") !== "0";
   const variant = Number(u.searchParams.get("variant") ?? "0");
-  const maxScan = Number(u.searchParams.get("maxScan") ?? "12");
+  const maxScan = Number(u.searchParams.get("maxScan") ?? "3");
   // 心跳间隔：默认 25s（真实节奏，避免 WAF 限流 403）；fast=1 时仍建议 ≥5s
   const gap = Number(u.searchParams.get("gap") ?? (fast ? "5" : "25"));
   const step = Number(u.searchParams.get("step") ?? "25");
@@ -131,7 +131,7 @@ export async function GET(request: Request) {
     }
     if (found.length >= 8) break;
     // 扫描限速：避免连续请求触发超星风控
-    await sleep(800);
+    await sleep(300);
   }
   if (found.length === 0)
     return Response.json({

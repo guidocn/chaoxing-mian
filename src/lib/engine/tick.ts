@@ -60,6 +60,9 @@ export interface EngineState {
   reportUrl: string;
   rt: string;
   dtoken: string;
+  fid: string;
+  attDurationEnc: string;
+  userid: string;
   // 缓存
   courses: Array<{ courseId: string; clazzId: string; cpi: string; title: string; teacher: string }>;
   chapters: CourseChapter[];
@@ -80,6 +83,9 @@ const initialState: EngineState = {
   reportUrl: "",
   rt: "0.9",
   dtoken: "",
+  fid: "",
+  attDurationEnc: "",
+  userid: "",
   courses: [],
   chapters: [],
   retry403: 0,
@@ -238,11 +244,14 @@ export async function runTick(
           state.jobid = v.jobid;
           state.otherInfo = v.otherInfo || chapter.knowledgeId;
           state.rt = v.rt || "0.9";
-          state.dtoken = v.dtoken || "";
-          const cfg = await fetchVideoConfig(cookies, v.objectId);
+          state.dtoken = "";
+          state.fid = v.fid || "";
+          state.attDurationEnc = v.attDurationEnc || "";
+          state.userid = v.userid || "";
+          const cfg = await fetchVideoConfig(cookies, v.objectId, v.fid);
           state.duration = cfg.duration || Number(v.duration) || 0;
-          state.enc = cfg.enc;
-          state.reportUrl = cfg.reportUrl;
+          state.dtoken = cfg.dtoken || "";
+          state.reportUrl = v.reportUrl || "";
           state.playingTime = 0;
           state.phase = "video";
           await log("info", `视频任务：${chapter.title}（时长 ${state.duration}s，${task.speed}x）`);
@@ -299,6 +308,9 @@ export async function runTick(
           reportUrl: state.reportUrl,
           rt: state.rt,
           dtoken: state.dtoken,
+          fid: state.fid,
+          attDurationEnc: state.attDurationEnc,
+          userid: state.userid,
         });
         state.playingTime = res.newPlayingTime;
 

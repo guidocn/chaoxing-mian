@@ -29,6 +29,7 @@ import {
 import type { CookieJar } from "../chaoxing/client";
 import {
   fetchVideoConfig,
+  initVideoSession,
   parseVideoTasks,
   reportDocumentDone,
   reportVideoHeartbeat,
@@ -267,6 +268,16 @@ export async function runTick(
           const cfg = await fetchVideoConfig(cookies, v.objectId, v.fid);
           state.duration = cfg.duration || Number(v.duration) || 0;
           state.dtoken = cfg.dtoken || "";
+          // 初始化观看会话（status 之后播放器会调 richvideo/initdatawithviewer）
+          if (cfg.key) {
+            try {
+              const init = await initVideoSession(cookies, v.objectId, cfg.key, v.fid);
+              if (init.ok) await log("info", `观看会话已初始化：${chapter.title}`);
+              else await log("warn", `会话初始化未成功(${init.status})：${chapter.title}`);
+            } catch {
+              await log("warn", `会话初始化异常，继续尝试上报：${chapter.title}`);
+            }
+          }
           state.reportUrl = v.reportUrl || "";
           state.playingTime = 0;
           state.phase = "video";

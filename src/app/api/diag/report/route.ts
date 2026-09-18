@@ -1,6 +1,6 @@
 import { getCxAccount, getTaskByAccount } from "@/lib/db/repo";
 import { requireUser } from "@/lib/server";
-import { fetchVideoConfig, reportVideoHeartbeat } from "@/lib/chaoxing/video";
+import { fetchVideoConfig, initVideoSession, reportVideoHeartbeat } from "@/lib/chaoxing/video";
 import type { CookieJar } from "@/lib/chaoxing/client";
 
 export const runtime = "edge";
@@ -51,8 +51,14 @@ export async function GET() {
   if (!objectId) return Response.json({ ok: false, message: "state 无视频任务（objectId 为空）", state });
 
   try {
-    // 1. 重新拉 dtoken
+    // 1. 重新拉 dtoken/key
     const cfg = await fetchVideoConfig(cookies, objectId, state.fid || account.fid || undefined);
+
+    // 1.5 初始化观看会话
+    let init = null;
+    if (cfg.key) {
+      init = await initVideoSession(cookies, objectId, cfg.key, state.fid || account.fid || undefined);
+    }
 
     // 2. 发起一次 30s 心跳上报
     const res = await reportVideoHeartbeat(cookies, {
@@ -91,7 +97,14 @@ export async function GET() {
         course_id: course.courseId,
         userid: state.userid || account.uid,
       },
-      status_config: { dtoken_from_status: !!cfg.dtoken, duration_from_status: cfg.duration },
+      status_config: {
+        dtoken_from_status: !!cfg.dtoken,
+        duration_from_status: cfg.duration,
+        key_from_status: !!cfg.key,
+      },
+      init_session: init
+        ? { status: init.status, ok: init.ok, body: init.body, url: init.url }
+        : "no-key",
       report: {
         passed: res.passed,
         new_playing_time: res.newPlayingTime,

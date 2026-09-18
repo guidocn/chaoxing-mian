@@ -295,14 +295,14 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
 }
 
 /**
- * 获取视频配置（dtoken/duration）。新版 status 接口需要 k 参数（fid），
- * 否则返回 403。响应含 dtoken/duration，无 reportUrl（reportUrl 在卡片 defaults）。
+ * 获取视频配置（dtoken/duration/key）。新版 status 接口需要 k 参数（fid），
+ * 否则返回 403。响应含 dtoken/duration/key，无 reportUrl（reportUrl 在卡片 defaults）。
  */
 export async function fetchVideoConfig(
   cookies: CookieJar,
   objectId: string,
   fid?: string,
-): Promise<{ duration: number; dtoken: string }> {
+): Promise<{ duration: number; dtoken: string; key: string }> {
   const client = new CxClient(cookies);
   const k = fid || client.getCookie("fid") || "";
   const r = await client.get(
@@ -316,15 +316,44 @@ export async function fetchVideoConfig(
   );
   let duration = 0;
   let dtoken = "";
+  let key = "";
   try {
     const j = JSON.parse(r.text) as {
       duration?: string | number;
       dtoken?: string;
+      key?: string;
     };
     duration = Number(j.duration ?? 0);
     dtoken = j.dtoken ?? "";
+    key = j.key ?? "";
   } catch {
     duration = 0;
   }
-  return { duration, dtoken };
+  return { duration, dtoken, key };
+}
+
+/**
+ * 初始化视频观看会话（播放器在 status 之后调用 richvideo/initdatawithviewer）。
+ * 超星通过该接口下发视频流地址，并在服务端登记"开始观看"会话；
+ * 跳过它可能导致后续 log/a 心跳不被计入学习时长。
+ */
+export async function initVideoSession(
+  cookies: CookieJar,
+  objectId: string,
+  key: string,
+  fid?: string,
+): Promise<{ ok: boolean; status: number; body: string; url: string }> {
+  const client = new CxClient(cookies);
+  const k = fid || client.getCookie("fid") || "";
+  const url =
+    `https://mooc1.chaoxing.com/richvideo/initdatawithviewer` +
+    `?objectId=${objectId}&key=${key}&k=${k}&flag=normal&ro=0&_dc=${Date.now()}`;
+  const r = await client.get(url, {
+    headers: {
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: "https://mooc1.chaoxing.com/ananas/modules/video/index.html",
+    },
+    timeout: 20000,
+  });
+  return { ok: r.status === 200, status: r.status, body: (r.text ?? "").slice(0, 300), url };
 }

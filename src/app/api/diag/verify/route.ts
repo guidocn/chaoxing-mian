@@ -53,8 +53,8 @@ export async function GET(request: Request) {
   // 心跳间隔：默认 25s（真实节奏，避免 WAF 限流 403）；fast=1 时仍建议 ≥5s
   const gap = Number(u.searchParams.get("gap") ?? (fast ? "5" : "25"));
   const step = Number(u.searchParams.get("step") ?? "25");
-  // Pages Function 网关限制单请求时长：强制单轮（25s），多轮用 from= 续播；diag=1 秒回
-  const maxRounds = u.searchParams.get("diag") === "1" ? 0 : 1;
+  // Pages Function 网关限制单请求时长：默认单轮；gap<=3 快跑时可传 maxRounds（上限 8，约 8s 心跳 + 扫描 ≈ 30s）
+  const maxRounds = u.searchParams.get("diag") === "1" ? 0 : Math.min(Number(u.searchParams.get("maxRounds") ?? "1"), gap <= 3 ? 8 : 4);
   const fmt = u.searchParams.get("fmt") ?? "json";
   const course = courses[courseIdx];
   const cookies: CookieJar = safeJson<CookieJar>(account.cookies, {});

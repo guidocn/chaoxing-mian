@@ -66,6 +66,8 @@ export interface EngineState {
   userid: string;
   // V2 会话初始化用的媒体任务 ID（真实播放器 initdatawithviewerV2?mid=）
   mid: string;
+  // 卡片 log/a 反推的真实 cpi（优先于课程级 cpi，多课程时可能不同）
+  cpi: string;
   // 每门课的独立进度
   courseProgress: Array<{ courseId: string; title: string; total: number; done: number }>;
   // 视频完成未确认重试计数
@@ -96,6 +98,7 @@ const initialState: EngineState = {
   attDurationEnc: "",
   userid: "",
   mid: "",
+  cpi: "",
   courseProgress: [],
   courses: [],
   chapters: [],
@@ -355,7 +358,7 @@ export async function runTick(
             const init = await initVideoSession(cookies, {
               objectId: v.objectId,
               mid: v.mid || state.mid || "",
-              cpi: course.cpi,
+              cpi: v.cpiFromUrl || course.cpi,
               clazzId: course.clazzId,
               courseId: course.courseId,
               key: cfg.key,
@@ -367,6 +370,7 @@ export async function runTick(
             await log("warn", `会话初始化异常(${e instanceof Error ? e.message.slice(0, 60) : e})，继续尝试上报：${chapter.title}`);
           }
           state.reportUrl = v.reportUrl || "";
+          state.cpi = v.cpiFromUrl || course.cpi;
           state.playingTime = 0;
           state.phase = "video";
           await log("info", `视频任务：${chapter.title}（时长 ${state.duration}s，1x 真实速率）`);
@@ -452,9 +456,11 @@ export async function runTick(
           fid: state.fid,
           attDurationEnc: state.attDurationEnc,
           userid: state.userid,
-          cpi: course.cpi,
+          cpi: state.cpi || course.cpi,
         });
         state.playingTime = res.newPlayingTime;
+        // 每次心跳后打印真实上报结果（HTTP 状态 + 超星响应），便于诊断心跳是否被接受
+        await log("info", `心跳上报：${chapter.title} ${state.playingTime}/${state.duration}s | ${res.raw.slice(0, 90)}`);
 
         if (res.finished) {
           if (res.passed) {

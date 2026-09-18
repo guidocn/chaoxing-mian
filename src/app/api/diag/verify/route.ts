@@ -49,7 +49,12 @@ export async function GET(request: Request) {
   const courseIdx = Math.min(Number(u.searchParams.get("course") ?? "0"), courses.length - 1);
   const fast = u.searchParams.get("fast") !== "0";
   const variant = Number(u.searchParams.get("variant") ?? "0");
-  const maxScan = Number(u.searchParams.get("maxScan") ?? "30");
+  const maxScan = Number(u.searchParams.get("maxScan") ?? "12");
+  // 心跳间隔：默认 25s（真实节奏，避免 WAF 限流 403）；fast=1 时仍建议 ≥5s
+  const gap = Number(u.searchParams.get("gap") ?? (fast ? "5" : "25"));
+  const step = Number(u.searchParams.get("step") ?? "25");
+  const maxRounds = Number(u.searchParams.get("maxRounds") ?? "99");
+  const fmt = u.searchParams.get("fmt") ?? "json";
   const course = courses[courseIdx];
   const cookies: CookieJar = safeJson<CookieJar>(account.cookies, {});
 
@@ -113,6 +118,8 @@ export async function GET(request: Request) {
       }
     }
     if (found.length > 0) break;
+    // 扫描限速：避免连续请求触发超星风控
+    await sleep(800);
   }
   if (found.length === 0)
     return Response.json({
@@ -134,15 +141,14 @@ export async function GET(request: Request) {
     }
   }
 
-  // 4. 完整心跳直到播满
+  // 4. 完整心跳直到播满（from 支持分轮续播：?from=50 从 50s 继续）
   const rounds: Array<{ t: number; playingTime: number; passed: boolean; raw: string }> = [];
-  let playing = 0;
+  let playing = Number(u.searchParams.get("from") ?? "0");
   let finished = false;
   let guard = 0;
-  while (guard < 60) {
+  while (guard < maxRounds) {
     guard += 1;
-    if (fast) await sleep(1000);
-    else await sleep(25000);
+    await sleep(gap * 1000);
     const res = await reportVideoHeartbeat(cookies, {
       clazzId: course.clazzId,
       courseId: course.courseId,
@@ -152,7 +158,7 @@ export async function GET(request: Request) {
       jobid: v.jobid,
       duration: v.duration,
       speed: 1,
-      step: 25,
+      step,
       playingTime: playing,
       reportUrl: v.reportUrl,
       rt: "1",
@@ -177,7 +183,7 @@ export async function GET(request: Request) {
     if (playing >= v.duration) break;
   }
 
-  return Response.json({
+  const result = {
     ok: true,
     course: course.title,
     video: {
@@ -195,13 +201,37 @@ export async function GET(request: Request) {
     },
     init_session: init ? { status: init.status, ok: init.ok, body: init.body?.slice(0, 120) } : "no-key",
     variant,
-    fast,
+    gap,
     rounds,
     final: {
       passed: rounds.some((r) => r.passed),
       finished,
       last_playing_time: playing,
     },
-    note: "isPassed=true 表示协议被超星确认；false 表示上报被接受但未达完成判定，需换 variant 再测",
+    note: "isPassed=true 表示协议被超星确认；HTTP 403 多为风控限流（间隔太小），可加大 gap；false 表示被接受但未达完成判定，需换 variant",
+  };
+
+  if (fmt === "text") {
+    const lines = [
+      `课程: ${result.course}`,
+      `章节: ${v.chapterTitle}`,
+      `objectId: ${v.objectId}`,
+      `duration: ${v.duration}s  jobid: ${v.jobid}`,
+      `fid: ${v.fid}  userid: ${v.userid}`,
+      `attDurationEnc: ${v.attDurationEnc || "(空)"}`,
+      `reportUrl: ${v.reportUrl}`,
+      `init: ${init ? `${init.status} ${init.ok}` : "no-key"} ${init?.body?.slice(0, 80) || ""}`,
+      `variant: ${variant}  gap: ${gap}s  step: ${step}s  from: ${playing - guard * step}s`,
+      ...rounds.map((r) => `轮${r.t} | 播到${r.playingTime}s | ${r.passed ? "通过✓" : "未通过✗"} | ${r.raw.replace(/\n/g, " ")}`),
+      `最终: ${result.final.passed ? "通过✓" : "未通过✗"} 播满=${result.final.finished}`,
+      `续播: /api/diag/verify?course=${courseIdx}&variant=${variant}&gap=${gap}&step=${step}&from=${playing}&fmt=text`,
+    ];
+    return new Response(lines.join("\n"), {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+
+  return Response.json(result, {
+    headers: { "Cache-Control": "no-store" },
   });
 }

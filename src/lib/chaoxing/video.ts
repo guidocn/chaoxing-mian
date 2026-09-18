@@ -58,7 +58,7 @@ const MD5_K = new Array<number>(64);
 for (let i = 0; i < 64; i++) {
   MD5_K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
 }
-function md5(s: string): string {
+export function md5(s: string): string {
   const msg = new TextEncoder().encode(s);
   const bitLen = msg.length * 8;
   const padded = new Uint8Array((Math.floor((msg.length + 8) / 64) + 1) * 64);

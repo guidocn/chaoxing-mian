@@ -1,6 +1,6 @@
 import { getCxAccount, getTaskByAccount } from "@/lib/db/repo";
 import { requireUser } from "@/lib/server";
-import { fetchVideoConfig, initVideoSession, reportVideoHeartbeat, parseVideoTasks } from "@/lib/chaoxing/video";
+import { fetchVideoConfig, initVideoSession, reportVideoHeartbeat, parseVideoTasks, md5 } from "@/lib/chaoxing/video";
 import { fetchChapters, fetchStudyCard } from "@/lib/chaoxing/api";
 import type { CookieJar } from "@/lib/chaoxing/client";
 
@@ -53,7 +53,8 @@ export async function GET(request: Request) {
   // 心跳间隔：默认 25s（真实节奏，避免 WAF 限流 403）；fast=1 时仍建议 ≥5s
   const gap = Number(u.searchParams.get("gap") ?? (fast ? "5" : "25"));
   const step = Number(u.searchParams.get("step") ?? "25");
-  const maxRounds = Number(u.searchParams.get("maxRounds") ?? "99");
+  // Pages Function 网关限制单请求时长：强制单轮（25s），多轮用 from= 续播；diag=1 秒回
+  const maxRounds = u.searchParams.get("diag") === "1" ? 0 : 1;
   const fmt = u.searchParams.get("fmt") ?? "json";
   const course = courses[courseIdx];
   const cookies: CookieJar = safeJson<CookieJar>(account.cookies, {});
@@ -153,11 +154,34 @@ export async function GET(request: Request) {
   }
 
   // 4. 完整心跳直到播满（from 支持分轮续播：?from=50 从 50s 继续）
+  //    diag=1 纯诊断模式：不跑心跳，直接输出视频信息 + 构造的 URL 预览（秒回）
   const rounds: Array<{ t: number; playingTime: number; passed: boolean; raw: string; url: string }> = [];
   let playing = Number(u.searchParams.get("from") ?? "0");
   let finished = false;
   let guard = 0;
-  while (guard < maxRounds) {
+  const diagOnly = u.searchParams.get("diag") === "1";
+  if (diagOnly) {
+    // 模拟一次心跳的 URL（playingTime 从 from 或 0 起步），不实际发送
+    const targetPlaying = Math.min(v.duration, playing + step);
+    const clipStr = `${playing}_${targetPlaying}`;
+    const playMs = targetPlaying * 1000;
+    const durMs = Math.max(1, v.duration) * 1000;
+    const enc = md5(
+      `[${course.clazzId}][${v.userid}][${v.jobid}][${v.objectId}][${playMs}][d_yHJ!$pdA~5][${durMs}][${clipStr}]`,
+    );
+    const base =
+      v.reportUrl && v.reportUrl !== "https://mooc1.chaoxing.com/multimedia/log"
+        ? v.reportUrl.replace(/\/+$/, "")
+        : `https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/${v.cpi}`;
+    rounds.push({
+      t: 1,
+      playingTime: targetPlaying,
+      passed: false,
+      raw: "(诊断模式未发送)",
+      url: `${base}/${v.dtoken}?clazzId=${course.clazzId}&playingTime=${targetPlaying}&duration=${v.duration}&clipTime=${clipStr}&objectId=${v.objectId}&otherInfo=${v.otherInfo}&jobid=${v.jobid}&userid=${v.userid}&isdrag=0&view=pc&enc=${enc}&rt=1&videoFaceCaptureEnc=&dtype=Video&_t=0&attDuration=${v.duration}&attDurationEnc=${v.attDurationEnc}&courseEngineInfo=false`,
+    });
+  }
+  while (guard < maxRounds && !diagOnly) {
     guard += 1;
     await sleep(gap * 1000);
     const res = await reportVideoHeartbeat(cookies, {

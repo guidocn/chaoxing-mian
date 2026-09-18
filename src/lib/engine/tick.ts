@@ -209,6 +209,17 @@ export async function runTick(
         state.phase = "chapters";
         state.chapterIndex = 0;
         await log("success", `共获取 ${state.courses.length} 门课程，开始刷课`);
+        // 诊断：检查每门课参数完整性（空 courseId/clazzId 会导致章节拉取失败）
+        const bad = state.courses.filter((x) => !x.courseId || !x.clazzId || !x.cpi);
+        if (bad.length > 0) {
+          await log(
+            "warn",
+            `${bad.length} 门课程参数不完整（courseId/clazzId/cpi 为空）：${bad
+              .map((x) => x.title || "?")
+              .slice(0, 5)
+              .join("、")}`,
+          );
+        }
         await save({ phase: "课程章节", total_points: state.courses.length }, state);
         return { done: false, status: "running", state, progress: { total: state.courses.length, finished: 0 } };
       } catch (e) {
@@ -220,14 +231,14 @@ export async function runTick(
     case "chapters": {
       if (!course) return advanceCourse(state, save, log);
       try {
-        const chapters = await fetchChapters(cookies, {
+        const { chapters, diag } = await fetchChapters(cookies, {
           clazzId: course.clazzId,
           courseId: course.courseId,
           cpi: course.cpi,
         });
         // 0 章节课程：可能是已失效/无权限课程，跳过避免死循环
         if (chapters.length === 0) {
-          await log("warn", `《${course.title || "超星课程"}》章节为空，跳过该课程`);
+          await log("warn", `《${course.title || "超星课程"}》章节为空，跳过该课程（${diag ?? ""}）`);
           return advanceCourse(state, save, log);
         }
         state.chapters = chapters;

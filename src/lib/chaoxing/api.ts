@@ -160,7 +160,7 @@ export interface CourseChapter {
 export async function fetchChapters(
   cookies: CookieJar,
   c: { clazzId: string; courseId: string; cpi: string },
-): Promise<CourseChapter[]> {
+): Promise<{ chapters: CourseChapter[]; diag?: string }> {
   const client = new CxClient(cookies);
   const referer =
     `https://mooc1.chaoxing.com/visit/interaction?clazzid=${c.clazzId}&courseid=${c.courseId}`;
@@ -184,7 +184,7 @@ export async function fetchChapters(
     headers: { Referer: `https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/stu` },
   });
   if (r.status === 403) throw new ForbiddenError("章节列表返回 403");
-  const { points } = decodeChapterList(r.text);
+  const { points, diag } = decodeChapterList(r.text);
 
   const chapters: CourseChapter[] = [];
   for (const p of points as ChapterPoint[]) {
@@ -200,7 +200,20 @@ export async function fetchChapters(
       url: studyUrl,
     });
   }
-  return chapters;
+  // 诊断信息（0 章节时日志可定位根因）
+  if (chapters.length === 0) {
+    const titleM = /<title>([^<]*)<\/title>/i.exec(r.text);
+    const clean = r.text
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .slice(0, 200);
+    return {
+      chapters,
+      diag: `http=${r.status} ${diag ?? ""} title=${titleM?.[1] ?? "?"} page="${clean}"`,
+    };
+  }
+  return { chapters };
 }
 
 /** 获取章节卡片页（含视频/文档/测验任务点参数） */

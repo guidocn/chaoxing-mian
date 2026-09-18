@@ -62,11 +62,12 @@ export async function GET(request: Request) {
   // 1. 拉章节
   let chapters: Array<{ knowledgeId: string; title: string }> = [];
   try {
-    chapters = await fetchChapters(cookies, {
+    const r = await fetchChapters(cookies, {
       clazzId: course.clazzId,
       courseId: course.courseId,
       cpi: course.cpi,
     });
+    chapters = r.chapters;
   } catch (e) {
     return Response.json({ ok: false, message: `拉章节失败: ${e instanceof Error ? e.message : e}` });
   }

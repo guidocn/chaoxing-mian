@@ -78,9 +78,11 @@ export interface ChapterPoint {
 }
 
 /** 解析章节列表页（mooc2-ans mycourse/studentcourse 返回的 HTML）中的知识点节点 */
-export function decodeChapterList(html: string): { hasLocked: boolean; points: ChapterPoint[] } {
+export function decodeChapterList(html: string): { hasLocked: boolean; points: ChapterPoint[]; diag?: string } {
   const points: ChapterPoint[] = [];
   let hasLocked = false;
+  const diagParts: string[] = [];
+  diagParts.push(`len=${html.length}`);
 
   // 知识点节点：<div class="chapter_item" id="curXXX" onclick="toOld('courseid','knowledgeId','clazzid',0)" ...>
   // 每个知识点是一个 chapter_item 块，内部含 catalog_name 标题与 input[value=knowledgeId]
@@ -114,7 +116,39 @@ export function decodeChapterList(html: string): { hasLocked: boolean; points: C
       });
     }
   }
-  return { hasLocked, points };
+
+  // 兜底：新版页面若 chapter_item 结构变化，直接扫描 knowledgeid= 链接/参数
+  if (points.length === 0) {
+    diagParts.push("chapter_item=0");
+    const knRe = /(?:knowledgeid|knowledgeId|chapterid)=(\d+)/g;
+    const seen = new Set<string>();
+    let km: RegExpExecArray | null;
+    while ((km = knRe.exec(html)) !== null) {
+      const kid = km[1];
+      if (seen.has(kid)) continue;
+      seen.add(kid);
+      // 取该知识点附近的标题（前 300 字符内最近的目录名）
+      const before = html.slice(Math.max(0, km.index - 500), km.index);
+      const titleM =
+        /(?:catalog_name|catalog_sbar|title)["'\s:=<>]{1,6}([^<>"']{2,60})/.exec(before) ??
+        /<span[^>]*>([^<>]{2,60})<\/span>/.exec(before.slice(-200));
+      points.push({
+        id: kid,
+        knowledgeId: kid,
+        title: titleM ? decodeEntities(titleM[1].trim()) : `章节 ${kid}`,
+        clazzId: "",
+        courseId: "",
+        cpi: "",
+        label: "",
+        locked: false,
+      });
+    }
+    diagParts.push(`knowledgeid_scan=${points.length}`);
+  } else {
+    diagParts.push(`chapter_item=${points.length}`);
+  }
+  if (hasLocked) diagParts.push("has_locked");
+  return { hasLocked, points, diag: diagParts.join(" ") };
 }
 
 /** 从卡片 HTML 提取 mArg 配置（包含 objectId、报告参数等） */

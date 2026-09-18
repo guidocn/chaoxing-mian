@@ -129,7 +129,7 @@ export async function GET(request: Request) {
         break;
       }
     }
-    if (found.length > 0) break;
+    if (found.length >= 8) break;
     // 扫描限速：避免连续请求触发超星风控
     await sleep(800);
   }
@@ -141,7 +141,22 @@ export async function GET(request: Request) {
       chapters_total: chapters.length,
     });
 
-  const v = found[0];
+  // 可选视频：?video=N 选第 N 个（默认 0）；diag=1 时列出前 8 个
+  const videoIdx = Math.min(Number(u.searchParams.get("video") ?? "0"), found.length - 1);
+  if (u.searchParams.get("diag") === "1") {
+    const lines = [
+      `找到 ${found.length} 个真视频（共扫 ${scan.length} 章）：`,
+      ...found.map((f, i) => `${i}. ${f.chapterTitle} | ${f.objectId} | ${f.duration}s | jobid=${f.jobid} | cpi=${f.cpi}`),
+      ``,
+      `当前默认选第 ${videoIdx} 个（${found[videoIdx].chapterTitle}）`,
+      `选其他视频: 加 &video=N（如 &video=1 选第 2 个）`,
+    ];
+    return new Response(lines.join("\n"), {
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }
+
+  const v = found[videoIdx];
 
   // 3. 初始化观看会话
   let init = null;

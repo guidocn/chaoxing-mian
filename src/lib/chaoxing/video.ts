@@ -33,6 +33,8 @@ export interface VideoTaskParams {
   // 参数变体（diag/verify 协议对照实验用）：
   // 0=baseline, 1=dtype 小写, 2=clipTime 毫秒, 3=去掉 view=pc, 4=POST, 6=加 mtEnc
   variant?: number;
+  // reportBase 变体：0=默认(卡片或 mooc-ans/log/a/{cpi})，1=无 mooc-ans，2=mooc2-ans 域
+  base?: number;
 }
 
 export interface VideoReportResult {
@@ -41,6 +43,8 @@ export interface VideoReportResult {
   newPlayingTime: number;
   finished: boolean;
   raw: string;
+  // 实际请求 URL（diag 诊断用，截断）
+  url?: string;
 }
 
 // 纯 JS MD5（RFC 1321），避免 edge runtime 依赖 node:crypto
@@ -114,10 +118,17 @@ export async function reportVideoHeartbeat(
   const userid = p.userid || client.getCookie("_uid") || client.getCookie("UID") || "";
   // reportUrl 优先用卡片 defaults；否则用课程真实 cpi（绝不能 fallback 到 0，否则超星不记录学习时间）
   const cpi = p.cpi || "";
-  const reportBase =
-    p.reportUrl && p.reportUrl !== "https://mooc1.chaoxing.com/multimedia/log"
-      ? p.reportUrl.replace(/\/+$/, "")
-      : `https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/${cpi}`;
+  // base：0=默认（卡片 reportUrl 或 mooc1/mooc-ans/log/a/{cpi}），1=无 mooc-ans 前缀，2=mooc2-ans 域
+  let reportBase: string;
+  if (p.base === 1) {
+    reportBase = `https://mooc1.chaoxing.com/multimedia/log/a/${cpi}`;
+  } else if (p.base === 2) {
+    reportBase = `https://mooc2-ans.chaoxing.com/mooc-ans/multimedia/log/a/${cpi}`;
+  } else if (p.reportUrl && p.reportUrl !== "https://mooc1.chaoxing.com/multimedia/log") {
+    reportBase = p.reportUrl.replace(/\/+$/, "");
+  } else {
+    reportBase = `https://mooc1.chaoxing.com/mooc-ans/multimedia/log/a/${cpi}`;
+  }
 
   // clipTime：秒级时间区间，形如 0_30；variant=2 时用毫秒
   const clipStr =
@@ -209,6 +220,7 @@ export async function reportVideoHeartbeat(
     newPlayingTime: targetPlaying,
     finished: targetPlaying >= p.duration,
     raw: `HTTP ${status} ${text.slice(0, 200)}`,
+    url: `${reportBase}/${p.dtoken || ""}?${finalParts.join("&").slice(0, 300)}`,
   };
 }
 
@@ -241,6 +253,7 @@ interface VideoTaskParsed {
   fid: string;
   attDurationEnc: string;
   userid: string;
+  cpiFromUrl: string;
 }
 
 /**
@@ -268,6 +281,18 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
       // 忽略 defaults 解析失败
     }
   }
+  // 兜底 1：JSON 顶层 reportUrl（新版 cards 接口直接返回 JSON，无 defaults= 块）
+  if (!reportUrl) {
+    const jr = /"reportUrl"\s*:\s*"([^"]+)"/.exec(html);
+    if (jr) reportUrl = jr[1];
+  }
+  // 兜底 2：任意位置的多媒体上报路径（含 cpi）
+  if (!reportUrl) {
+    const lr = /(?:mooc1\.chaoxing\.com)?(\/mooc-ans\/multimedia\/log\/a\/\d+)/.exec(html);
+    if (lr) reportUrl = lr[1];
+  }
+  // cpi 从 reportUrl 反推（log/a/{cpi}），供 fallback 使用
+  const cpiFromUrl = /log\/a\/(\d+)/.exec(reportUrl)?.[1] ?? "";
 
   // attachments 视频条目（优先，字段最全）
   const attRe = /\{\s*"begins"[\s\S]*?"objectId"\s*:\s*"([0-9a-f]+)"[\s\S]*?\}/g;
@@ -291,6 +316,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
       fid,
       attDurationEnc: attDurM?.[1] ?? "",
       userid,
+      cpiFromUrl,
     });
   }
 
@@ -319,6 +345,7 @@ export function parseVideoTasks(html: string): VideoTaskParsed[] {
         fid,
         attDurationEnc: attDurEncRe.exec(html)?.[1] ?? "",
         userid,
+        cpiFromUrl,
       });
     }
   }

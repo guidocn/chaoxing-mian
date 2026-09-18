@@ -79,6 +79,7 @@ export async function GET(request: Request) {
     jobid: string;
     otherInfo: string;
     reportUrl: string;
+    cpi: string;
     fid: string;
     attDurationEnc: string;
     userid: string;
@@ -86,6 +87,7 @@ export async function GET(request: Request) {
     dtoken: string;
     key?: string;
     cardStatus: number;
+    cardDiag?: { has_defaults: boolean; has_report_url: boolean; has_log_a: boolean; html_len: number };
   }> = [];
   for (const ch of scan) {
     const card = await fetchStudyCard(cookies, {
@@ -106,6 +108,8 @@ export async function GET(request: Request) {
           jobid: v.jobid,
           otherInfo: v.otherInfo || ch.knowledgeId,
           reportUrl: v.reportUrl,
+          // cpi 优先用卡片 log/a 路径反推的真实 cpi，其次课程 cpi
+          cpi: v.cpiFromUrl || course.cpi,
           fid: v.fid || account.fid || "1888",
           attDurationEnc: v.attDurationEnc || "",
           userid: v.userid || account.uid || "",
@@ -113,6 +117,13 @@ export async function GET(request: Request) {
           dtoken: cfg.dtoken || "",
           key: cfg.key,
           cardStatus: card.status,
+          // 诊断：卡片 HTML 里 defaults / reportUrl 的原始证据
+          cardDiag: {
+            has_defaults: /defaults\s*=/.test(card.html),
+            has_report_url: /reportUrl/.test(card.html),
+            has_log_a: /multimedia\/log/.test(card.html),
+            html_len: card.html.length,
+          },
         });
         break;
       }
@@ -142,7 +153,7 @@ export async function GET(request: Request) {
   }
 
   // 4. 完整心跳直到播满（from 支持分轮续播：?from=50 从 50s 继续）
-  const rounds: Array<{ t: number; playingTime: number; passed: boolean; raw: string }> = [];
+  const rounds: Array<{ t: number; playingTime: number; passed: boolean; raw: string; url: string }> = [];
   let playing = Number(u.searchParams.get("from") ?? "0");
   let finished = false;
   let guard = 0;
@@ -166,8 +177,9 @@ export async function GET(request: Request) {
       fid: v.fid,
       attDurationEnc: v.attDurationEnc,
       userid: v.userid,
-      cpi: course.cpi,
+      cpi: v.cpi,
       variant,
+      base: Number(u.searchParams.get("base") ?? "0"),
     });
     playing = res.newPlayingTime;
     rounds.push({
@@ -175,6 +187,7 @@ export async function GET(request: Request) {
       playingTime: playing,
       passed: res.passed,
       raw: res.raw.slice(0, 180),
+      url: (res as unknown as { url?: string }).url || "",
     });
     if (res.passed || res.finished) {
       finished = res.finished;
@@ -186,6 +199,9 @@ export async function GET(request: Request) {
   const result = {
     ok: true,
     course: course.title,
+    cpi: v.cpi,
+    course_id: course.courseId,
+    clazz_id: course.clazzId,
     video: {
       chapter: v.chapterTitle,
       object_id: v.objectId,
@@ -198,6 +214,7 @@ export async function GET(request: Request) {
       att_duration_enc: v.attDurationEnc,
       report_url: v.reportUrl,
       card_status: v.cardStatus,
+      card_diag: v.cardDiag,
     },
     init_session: init ? { status: init.status, ok: init.ok, body: init.body?.slice(0, 120) } : "no-key",
     variant,
@@ -215,14 +232,17 @@ export async function GET(request: Request) {
     const lines = [
       `课程: ${result.course}`,
       `章节: ${v.chapterTitle}`,
-      `objectId: ${v.objectId}`,
+      `objectId: ${v.objectId}  cpi: ${v.cpi}  clazzId: ${course.clazzId}`,
       `duration: ${v.duration}s  jobid: ${v.jobid}`,
       `fid: ${v.fid}  userid: ${v.userid}`,
       `attDurationEnc: ${v.attDurationEnc || "(空)"}`,
-      `reportUrl: ${v.reportUrl}`,
+      `reportUrl: ${v.reportUrl || "(空→fallback)"}`,
+      `卡片诊断: defaults=${v.cardDiag?.has_defaults} reportUrl字段=${v.cardDiag?.has_report_url} log/a=${v.cardDiag?.has_log_a} 卡片长度=${v.cardDiag?.html_len}`,
       `init: ${init ? `${init.status} ${init.ok}` : "no-key"} ${init?.body?.slice(0, 80) || ""}`,
-      `variant: ${variant}  gap: ${gap}s  step: ${step}s  from: ${playing - guard * step}s`,
-      ...rounds.map((r) => `轮${r.t} | 播到${r.playingTime}s | ${r.passed ? "通过✓" : "未通过✗"} | ${r.raw.replace(/\n/g, " ")}`),
+      `variant: ${variant}  gap: ${gap}s  step: ${step}s  from: ${Math.max(0, playing - guard * step)}s`,
+      ...rounds.map(
+        (r) => `轮${r.t} | 播到${r.playingTime}s | ${r.passed ? "通过✓" : "未通过✗"} | ${r.raw.replace(/\n/g, " ")}\n  URL: ${r.url}`,
+      ),
       `最终: ${result.final.passed ? "通过✓" : "未通过✗"} 播满=${result.final.finished}`,
       `续播: /api/diag/verify?course=${courseIdx}&variant=${variant}&gap=${gap}&step=${step}&from=${playing}&fmt=text`,
     ];
